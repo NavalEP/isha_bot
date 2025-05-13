@@ -21,8 +21,11 @@ var/
 venv/
 .env
 *.sqlite3
-# Virtual environment path
-/Users/navalkumar/Downloads/CarePay_Bot/venv/
+# Virtual environment paths
+.venv/
+venv/
+env/
+ENV/
 
 # Next.js
 .next/
