@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 
 // API base URL from environment variable with fallback
-const API_BASE_URL = process.env.CAREPAY_API_URL || 'http://localhost:8000/api/v1/agent';
+const API_BASE_URL = process.env.CAREPAY_API_URL || 'http://localhost:8000';
 
 // Create a new session
 export async function POST() {
   try {
-    const response = await fetch(`${API_BASE_URL}/session/`, {
+    const response = await fetch(`${API_BASE_URL}/api/v1/agent/session/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -45,7 +45,7 @@ export async function GET(request: Request) {
       }, { status: 400 });
     }
 
-    const response = await fetch(`${API_BASE_URL}/session/${sessionId}/`, {
+    const response = await fetch(`${API_BASE_URL}/api/v1/agent/session/${sessionId}/`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
