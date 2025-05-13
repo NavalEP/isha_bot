@@ -6,11 +6,13 @@ class SessionData(models.Model):
     """
     Model to store session data with loan inquiry information.
     """
-    application_id = models.UUIDField(primary_key=False, default=uuid.uuid4, editable=False)
+    id = models.AutoField(primary_key=True)
+    phone_number = models.CharField(max_length=10, null=True, blank=True)
+    application_id = models.UUIDField(default=uuid.uuid4, editable=False)
     session_id = models.UUIDField(default=uuid.uuid4, editable=False)
     user_id = models.UUIDField(null=True, blank=True)
     data = models.JSONField(null=True, blank=True)
-    loan_inquiry = models.JSONField(null=True, blank=True)
+    history = models.JSONField(null=True, blank=True)
     status = models.CharField(max_length=50, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -3,7 +3,7 @@ import { cookies } from 'next/headers';
 
 export async function POST(req: Request) {
   try {
-    const { phone_number, otp } = await req.json();
+    const { phone_number, otp, doctorId, doctorName } = await req.json();
 
     if (!phone_number || !otp) {
       return NextResponse.json(
@@ -13,9 +13,16 @@ export async function POST(req: Request) {
     }
 
     console.log("Verifying OTP for phone:", phone_number);
+    if (doctorId) console.log("With doctorId:", doctorId);
+    if (doctorName) console.log("With doctorName:", doctorName);
     
     // Use a hardcoded URL for now to troubleshoot
     const backendUrl = "http://localhost:8000";
+    
+    // Only include doctor information in the request if it exists
+    const requestBody: any = { phone_number, otp };
+    if (doctorId) requestBody.doctorId = doctorId;
+    if (doctorName) requestBody.doctorName = doctorName;
     
     // Forward the request to the backend API
     const response = await fetch(`${backendUrl}/api/v1/agent/login/verify-otp/`, {
@@ -23,7 +30,7 @@ export async function POST(req: Request) {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ phone_number, otp }),
+      body: JSON.stringify(requestBody),
     });
 
     console.log("Backend response status:", response.status);
@@ -71,22 +78,11 @@ export async function POST(req: Request) {
       path: '/',
       sameSite: 'strict',
     });
-    
-    // Set doctor_id and doctor_name cookies if they exist in the response
-    if (data.doctor_id) {
-      console.log("Setting doctor_id cookie with value:", data.doctor_id);
-      cookieStore.set('doctor_id', data.doctor_id, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: 7 * 24 * 60 * 60, // 7 days
-        path: '/',
-        sameSite: 'strict',
-      });
-    }
-    
-    if (data.doctor_name) {
-      console.log("Setting doctor_name cookie with value:", data.doctor_name);
-      cookieStore.set('doctor_name', data.doctor_name, {
+
+    // Only set doctor cookies if the information exists
+    if (doctorId) {
+      console.log("Setting doctor_id cookie with value:", doctorId);
+      cookieStore.set('doctor_id', doctorId, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         maxAge: 7 * 24 * 60 * 60, // 7 days
@@ -95,14 +91,28 @@ export async function POST(req: Request) {
       });
     }
 
-    // Return the token in the response body as well
-    return NextResponse.json({
+    if (doctorName) {
+      console.log("Setting doctor_name cookie with value:", doctorName);
+      cookieStore.set('doctor_name', doctorName, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 7 * 24 * 60 * 60, // 7 days
+        path: '/',
+        sameSite: 'strict',
+      });
+    }
+
+    // Return only the doctor information that exists in the response
+    const responseBody: any = {
       message: "OTP verified successfully",
       token: data.token,
-      phone_number: phone_number,
-      doctor_id: data.doctor_id,
-      doctor_name: data.doctor_name
-    });
+      phone_number: phone_number
+    };
+
+    if (doctorId) responseBody.doctorId = doctorId;
+    if (doctorName) responseBody.doctorName = doctorName;
+
+    return NextResponse.json(responseBody);
   } catch (error) {
     console.error('Error verifying OTP:', error);
     return NextResponse.json(

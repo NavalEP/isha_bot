@@ -10,7 +10,7 @@ interface AuthContextType {
   doctorId: string | null;
   doctorName: string | null;
   login: (token: string, phoneNumber: string, doctorId?: string | null, doctorName?: string | null) => void;
-  logout: () => Promise<void>;
+  logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -45,11 +45,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const login = (token: string, phoneNumber: string, doctorId: string | null = null, doctorName: string | null = null) => {
+  const login = (token: string, phoneNumber: string, doctorId?: string | null, doctorName?: string | null) => {
     // Still use localStorage for client-side checks (cookies are handled by API route)
     localStorage.setItem("auth_token", token);
     localStorage.setItem("phone_number", phoneNumber);
     
+    // Only store doctor information if it exists
     if (doctorId) {
       localStorage.setItem("doctor_id", doctorId);
       setDoctorId(doctorId);
@@ -65,41 +66,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsAuthenticated(true);
   };
 
-  const logout = async (): Promise<void> => {
-    // First clear localStorage
+  const logout = async () => {
+    // Clear localStorage
     localStorage.removeItem("auth_token");
     localStorage.removeItem("phone_number");
+    
+    // Store doctor information before clearing it
+    const currentDoctorId = doctorId;
+    const currentDoctorName = doctorName;
+    
     localStorage.removeItem("doctor_id");
     localStorage.removeItem("doctor_name");
     
-    // Also clear any session-related data
-    localStorage.removeItem("carepay_sessions");
+    // Clear cookies via API and get doctor information
+    let logoutDoctorId = currentDoctorId;
+    let logoutDoctorName = currentDoctorName;
     
-    // Clear cookies via API
     try {
-      const response = await fetch('/api/logout', { 
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await fetch('/api/logout', { method: 'POST' });
+      const data = await response.json();
       
-      if (!response.ok) {
-        console.error('Logout API returned error:', await response.text());
-      }
+      // Use doctor information from API response if available
+      if (data.doctorId) logoutDoctorId = data.doctorId;
+      if (data.doctorName) logoutDoctorName = data.doctorName;
     } catch (error) {
-      console.error('Error calling logout API:', error);
+      console.error('Error logging out:', error);
     }
     
-    // Update state
     setToken(null);
     setPhoneNumber(null);
     setDoctorId(null);
     setDoctorName(null);
     setIsAuthenticated(false);
     
-    // Force a hard navigation to ensure all state is cleared
-    window.location.href = "/login";
+    // Redirect to login page with doctor credentials if available
+    if (logoutDoctorId && logoutDoctorName) {
+      const loginUrl = `/login?doctorId=${encodeURIComponent(logoutDoctorId)}&doctor_name=${encodeURIComponent(logoutDoctorName)}`;
+      router.push(loginUrl);
+    } else {
+      router.push("/login");
+    }
   };
 
   return (

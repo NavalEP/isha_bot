@@ -26,19 +26,9 @@ class JWTAuthentication(BaseAuthentication):
             
             if not phone_number:
                 raise AuthenticationFailed('Invalid token payload')
-            
-            # Extract doctor details if available
-            doctor_id = payload.get('doctor_id')
-            doctor_name = payload.get('doctor_name')
                 
-            # Return the user identifier (phone_number), auth info, and doctor details
-            auth_info = {
-                'token': token,
-                'doctor_id': doctor_id,
-                'doctor_name': doctor_name
-            }
-            
-            return (phone_number, auth_info)
+            # Return the user identifier (phone_number) and auth info
+            return (phone_number, token)
             
         except IndexError:
             raise AuthenticationFailed('Token prefix missing')

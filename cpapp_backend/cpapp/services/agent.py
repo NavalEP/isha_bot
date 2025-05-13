@@ -17,6 +17,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_core.tools import ArgsSchema
 from cpapp.services.api_client import CarepayAPIClient
+from cpapp.models.session_data import SessionData
 from setup_env import setup_environment
 
 
@@ -271,10 +272,14 @@ class CarepayAgent:
 
         return agent_executor
     
-    def create_session(self) -> str:
+    def create_session(self, doctor_id=None, doctor_name=None, phone_number=None) -> str:
         """
         Create a new chat session
         
+        Args:
+            doctor_id: Optional doctor ID from URL parameters
+            doctor_name: Optional doctor name from URL parameters
+            phone_number: Optional phone number from URL parameters
         Returns:
             Session ID
         """
@@ -289,12 +294,24 @@ class CarepayAgent:
                 "status": "initial",  
                 "history": [],  
                 "data": {},  
-                "user_id": None  
+                "phone_number": phone_number
             }
+            
+            # Store doctor information if provided
+            if doctor_id:
+                session["data"]["doctor_id"] = doctor_id
+                logger.info(f"Stored doctor_id {doctor_id} in session {session_id}")
+            
+            if doctor_name:
+                session["data"]["doctor_name"] = doctor_name
+                logger.info(f"Stored doctor_name {doctor_name} in session {session_id}")
             
             # Store session
             self.sessions[session_id] = session
             logger.info(f"Created new session: {session_id}")
+            
+            # Save to database
+            self.save_session_to_db(session_id)
             
             return session_id
         except Exception as e:
@@ -323,6 +340,11 @@ class CarepayAgent:
             # Get session data
             session = self.sessions[session_id]
             current_status = session.get("status", "initial")
+            
+            # Check if session is marked as expired
+            if current_status == "expired":
+                return "Session has expired after loan decision. Please start a new chat to continue."
+                
             phone = session.get("data", {}).get("phone", None)
             
             logger.info(f"Processing message in session {session_id} with status {current_status} and phone {phone}")
@@ -502,45 +524,19 @@ class CarepayAgent:
                             "emiPlans": emi_plans,
                             "customerName": user_name,
                             "decisionMessage": decision_message
-                        }
+                        },
+                        "message": ai_message
                     }
                     
-                    # Check if we need to override the LLM's decision message based on internal knowledge
-                    if hasattr(self, '_current_session_id'):
-                        session_id = self._current_session_id
-                        if session_id in self.sessions and "data" in self.sessions[session_id]:
-                            session_data = self.sessions[session_id]["data"]
-                            if "bureau_decision_details" in session_data:
-                                actual_status = session_data["bureau_decision_details"].get("status")
-                                if actual_status and bureau_decision:
-                                    # If there's a mismatch, log it and use the stored status from API
-                                    if actual_status != bureau_decision:
-                                        logger.warning(f"Bureau decision mismatch: API status '{actual_status}' vs LLM extracted '{bureau_decision}'")
-                                        
-                                        # Override with the correct status and generate proper message
-                                        bureau_decision = actual_status
-                                        formatted_response["bureauDecision"]["status"] = bureau_decision
-                                        
-                                        # Generate the correct decision message based on the actual status
-                                        if bureau_decision.upper() == "APPROVED":
-                                            formatted_response["bureauDecision"]["decisionMessage"] = f"### Loan Application Decision:\n\n🎉 Congratulations, {user_name}! Your loan application has been **APPROVED**."
-                                        elif bureau_decision.upper() == "REJECTED":
-                                            reason_text = session_data["bureau_decision_details"].get("reason") or "Insufficient credit score or eligibility"
-                                            formatted_response["bureauDecision"]["decisionMessage"] = f"### Loan Application Decision:\n\nWe regret to inform you that your loan application has been **REJECTED**.\nReason: {reason_text}"
-                                        elif "INCOME" in bureau_decision.upper() and "VERIFICATION" in bureau_decision.upper():
-                                            formatted_response["bureauDecision"]["decisionMessage"] = f"### Loan Application Decision:\n\nYour application requires **INCOME VERIFICATION**. Please submit additional income documents to proceed."
-                                        else:
-                                            formatted_response["bureauDecision"]["decisionMessage"] = f"### Loan Application Decision:\n\nYour loan application status is: **{bureau_decision}**."
+                    # Mark the session for expiration since we've returned a loan decision
+                    self.sessions[session_id]["status"] = "expired"
+                    logger.info(f"Session {session_id} marked as expired after returning loan decision")
                     
-                    # Convert the formatted response to JSON and log it
-                    formatted_json = json.dumps(formatted_response)
-                    logger.info(f"Formatted bureau decision response: {formatted_json}")
+                    # Save the expired status to database
+                    self.save_session_to_db(session_id)
                     
-                    # Store the formatted response in the session
-                    self.sessions[session_id]["data"]["bureau_decision"] = formatted_response["bureauDecision"]
-                    
-                    # Return the formatted response
-                    return formatted_json
+                    # Return the formatted response as JSON string
+                    return json.dumps(formatted_response)
                     
                 except Exception as e:
                     logger.error(f"Error formatting bureau decision: {e}")
@@ -549,6 +545,9 @@ class CarepayAgent:
             # Save updated history to session
             session["history"] = chat_history
             self.sessions[session_id] = session
+            
+            # Save updated session to database
+            self.save_session_to_db(session_id)
             
             return ai_message
         
@@ -600,27 +599,14 @@ class CarepayAgent:
                 # Store user_id at the session level
                 self.sessions[session_id]['user_id'] = user_id
             
-            # Preserve doctor details if they exist in the session
-            doctor_id = None
-            doctor_name = None
-            
-            if "data" in self.sessions[session_id]:
-                doctor_id = self.sessions[session_id]["data"].get("doctor_id")
-                doctor_name = self.sessions[session_id]["data"].get("doctor_name")
                 
             # Update session data
             self.sessions[session_id]["data"].update(data)
-            
-            # Restore doctor details if they were present
-            if doctor_id and "doctor_id" not in data:
-                self.sessions[session_id]["data"]["doctor_id"] = doctor_id
-                logger.info(f"Preserved doctor_id {doctor_id} in session {session_id}")
-                
-            if doctor_name and "doctor_name" not in data:
-                self.sessions[session_id]["data"]["doctor_name"] = doctor_name
-                logger.info(f"Preserved doctor_name {doctor_name} in session {session_id}")
-                
             logger.info(f"Session data updated: {self.sessions[session_id]['data']}")
+            
+            # Save updated session to database
+            self.save_session_to_db(session_id)
+            
             return f"Data successfully stored in session {session_id}"
         except Exception as e:
             logger.error(f"Error storing user data: {e}")
@@ -657,6 +643,9 @@ class CarepayAgent:
                         
                         # Also store in session data for completeness
                         self.sessions[session_id]["data"]["userId"] = user_id
+                        
+                        # Save updated session to database
+                        self.save_session_to_db(session_id)
             
             return json.dumps(result)
         except Exception as e:
@@ -725,6 +714,9 @@ class CarepayAgent:
                     if prefill_data:
                         self.sessions[session_id]["data"]["prefill_data"] = prefill_data
                         logger.info(f"Stored prefill data in session: {prefill_data}")
+                        
+                        # Save updated session to database
+                        self.save_session_to_db(session_id)
                 except Exception as e:
                     logger.warning(f"Error processing prefill data: {e}")
             
@@ -802,6 +794,9 @@ class CarepayAgent:
                     if employment_data:
                         self.sessions[session_id]["data"]["employment_data"] = employment_data
                         logger.info(f"Stored employment data in session: {employment_data}")
+                        
+                        # Save updated session to database
+                        self.save_session_to_db(session_id)
                 except Exception as e:
                     logger.warning(f"Error processing employment data: {e}")
             
@@ -936,28 +931,12 @@ class CarepayAgent:
                 if session and "data" in session:
                     doctor_id = session["data"].get("doctor_id")
                     doctor_name = session["data"].get("doctor_name")
-                    
-            # Use doctor details from input if provided
-            if "doctorId" in data:
-                doctor_id = data.get("doctorId")
-            if "doctorName" in data:
-                doctor_name = data.get("doctorName")
+                    logger.info(f"Retrieved doctor_id {doctor_id} and doctor_name {doctor_name} from session for loan details")
             
             if not user_id or not name or not loan_amount:
                 return "User ID, name, and loan amount are required"
-            
-            if not doctor_id or not doctor_name:
-                error_msg = "Doctor ID and doctor name are required for loan details. Please ensure they are available in the session."
-                logger.error(error_msg)
-                return json.dumps({"error": error_msg, "status": 400})
-            
-            # Update the API client's doctor details
-            self.api_client.doctor_id = doctor_id
-            self.api_client.doctor_name = doctor_name
-            self.api_client.has_doctor_details = True
-            logger.info(f"Using doctor details from session: doctor_id={doctor_id}, doctor_name={doctor_name}")
                 
-            result = self.api_client.save_loan_details(user_id, name, loan_amount)
+            result = self.api_client.save_loan_details(user_id, name, loan_amount, doctor_name, doctor_id)
             return json.dumps(result)
         except Exception as e:
             logger.error(f"Error saving loan details: {e}")
@@ -993,6 +972,9 @@ class CarepayAgent:
                     loan_id = data["loanId"]
                     self.sessions[session_id]["data"]["loanId"] = loan_id
                     logger.info(f"Stored loanId {loan_id} in session {session_id}")
+                    
+                    # Save updated session to database
+                    self.save_session_to_db(session_id)
             
             return json.dumps(result)
         except Exception as e:
@@ -1034,6 +1016,9 @@ class CarepayAgent:
                 # Also store if we successfully retrieved the report (for use in later steps)
                 self.sessions[self._current_session_id]["data"]["bureau_report_retrieved"] = (result.get("status") == 200)
                 logger.info(f"Stored bureau report status in session for loan ID: {loan_id}")
+                
+                # Save updated session to database
+                self.save_session_to_db(self._current_session_id)
             
             # Enhanced logging to ensure visibility
             logger.info(f"Bureau Report Response - Status: {result.get('status')}")
@@ -1072,32 +1057,26 @@ class CarepayAgent:
             # Check if input_str is just a loan ID (not JSON)
             if input_str and input_str.strip() and not input_str.strip().startswith('{'):
                 loan_id = input_str.strip()
-                doctor_id = None
                 regenerate_param = 0
             else:
                 # Try to parse as JSON
                 data = json.loads(input_str)
                 loan_id = data.get("loan_id") or data.get("loanId")
-                doctor_id = data.get("doctor_id") or data.get("doctorId")
                 regenerate_param = data.get("regenerate_param", 0) or data.get("regenerateParam", 0)
             
             # If loan_id is not provided, try to get from session
-            session = None
+            if not loan_id and hasattr(self, '_current_session_id'):
+                session = self.sessions.get(self._current_session_id)
+                if session and "data" in session and "loanId" in session["data"]:
+                    loan_id = session["data"]["loanId"]
+            
+            # Get doctor_id from session if available, otherwise use default
+            doctor_id = "e71779851b144d1d9a25a538a03612fc"  # Default doctor ID as fallback
             if hasattr(self, '_current_session_id'):
                 session = self.sessions.get(self._current_session_id)
-                
-            if not loan_id and session and "data" in session and "loanId" in session["data"]:
-                loan_id = session["data"]["loanId"]
-            
-            # Get doctor_id from session if not provided
-            if not doctor_id and session and "data" in session and "doctor_id" in session["data"]:
-                doctor_id = session["data"]["doctor_id"]
-            
-            # Require doctor_id to be provided from session or input
-            if not doctor_id:
-                error_msg = "Doctor ID is required for bureau decision. Please ensure it is available in the session."
-                logger.error(error_msg)
-                return json.dumps({"error": error_msg, "status": 400})
+                if session and "data" in session and "doctor_id" in session["data"]:
+                    doctor_id = session["data"]["doctor_id"]
+                    logger.info(f"Using doctor_id {doctor_id} from session for bureau decision")
             
             if not loan_id:
                 return "Loan ID is required"
@@ -1105,7 +1084,7 @@ class CarepayAgent:
             result = self.api_client.get_bureau_decision(doctor_id, loan_id, regenerate_param)
             
             # Log the raw API response for debugging
-            logger.info(f"Bureau decision API response for loan ID {loan_id} with doctor ID {doctor_id}: {json.dumps(result)}")
+            logger.info(f"Bureau decision API response for loan ID {loan_id}: {json.dumps(result)}")
             
             # Check if the response contains the special INCOME_VERIFICATION_REQUIRED status
             if (isinstance(result, dict) and result.get("status") == 200 and 
@@ -1126,6 +1105,9 @@ class CarepayAgent:
                     if session_id in self.sessions:
                         self.sessions[session_id]["data"]["bureau_decision_details"] = bureau_result
                         logger.info(f"Stored bureau decision details in session: {bureau_result}")
+                        
+                        # Save updated session to database
+                        self.save_session_to_db(session_id)
             
             return json.dumps(result)
         except Exception as e:
@@ -1491,3 +1473,59 @@ class CarepayAgent:
                 "error": f"Error processing address data: {str(e)}",
                 "userId": user_id if 'user_id' in locals() else None
             })
+
+    def save_session_to_db(self, session_id: str) -> None:
+        """
+        Save session data to the database
+        
+        Args:
+            session_id: Session identifier
+        """
+        try:
+            if session_id not in self.sessions:
+                logger.warning(f"Cannot save session {session_id} to DB: Session not found")
+                return
+                
+            session = self.sessions[session_id]
+            
+            # Get or create SessionData object
+            session_data_obj, created = SessionData.objects.get_or_create(
+                session_id=uuid.UUID(session_id),
+                defaults={
+                    'application_id': session.get('application_id', uuid.uuid4()),
+                    'phone_number': session.get('phone_number', None),
+                    'user_id': session.get('user_id', None),
+                    'data': session.get('data', {}),
+                    'history': session.get('history', []),
+                    'status': session.get('status', 'initial')
+                }
+            )
+            
+            if not created:
+                # Update existing record
+                if 'phone_number' in session and session['phone_number']:
+                    session_data_obj.phone_number = session['phone_number']
+                if 'user_id' in session and session['user_id']:
+                    session_data_obj.user_id = session['user_id']
+                if 'data' in session:
+                    session_data_obj.data = session['data']
+                if 'history' in session:
+                    # Convert LangChain message objects to serializable format
+                    history = []
+                    for msg in session['history']:
+                        if isinstance(msg, (HumanMessage, AIMessage, SystemMessage)):
+                            history.append({
+                                'type': msg.__class__.__name__,
+                                'content': msg.content
+                            })
+                        else:
+                            history.append(msg)
+                    session_data_obj.history = history
+                if 'status' in session:
+                    session_data_obj.status = session['status']
+                
+                session_data_obj.save()
+                
+            logger.info(f"Session {session_id} saved to database")
+        except Exception as e:
+            logger.error(f"Error saving session {session_id} to database: {e}")

@@ -12,7 +12,7 @@ def setup_environment(use_mock=True, custom_api_url=None):
         custom_api_url: Custom API base URL to use instead of default
     """
     # OpenAI API Key - Replace with your actual key
-    os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY_HERE"  # Replace with actual key before using
+    os.environ["OPENAI_API_KEY"] = "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"  # Replace with actual key before using
     
     # Set mock API flag based on parameter
     os.environ["MOCK_API"] = str(use_mock).lower()

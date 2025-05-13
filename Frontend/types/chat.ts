@@ -7,6 +7,7 @@ export interface Message {
   timestamp: Date;
   attachments?: MessageAttachment[];
   bureauDecision?: BureauDecision;
+  sessionExpired?: boolean;
 }
 
 export interface MessageAttachment {
@@ -29,6 +30,13 @@ export interface BureauDecision {
   reason: string | null;
   maxEligibleEMI: string | null;
   emiPlans: EMIPlan[];
+}
+
+// Chat Session interface for history
+export interface ChatSession {
+  id: string;
+  timestamp: Date;
+  preview: string;
 }
 
 // Response types for API

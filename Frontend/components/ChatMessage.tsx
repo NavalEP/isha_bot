@@ -1,4 +1,4 @@
-import { Check, FileImage, FileText, User, Bot, CreditCard, ArrowRight } from "lucide-react";
+import { Check, FileImage, FileText, User, Bot, CreditCard, ArrowRight, RefreshCw } from "lucide-react";
 import { Message, MessageType, MessageAttachment, BureauDecision, EMIPlan } from "@/types/chat";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -6,9 +6,10 @@ import { cn } from "@/lib/utils";
 
 interface ChatMessageProps {
   message: Message;
+  onNewChat?: () => void;
 }
 
-export default function ChatMessage({ message }: ChatMessageProps) {
+export default function ChatMessage({ message, onNewChat }: ChatMessageProps) {
   const isBot = message.type === 'bot';
   const formattedTime = new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
@@ -44,6 +45,24 @@ export default function ChatMessage({ message }: ChatMessageProps) {
         )}>
           <p className="whitespace-pre-wrap">{message.text}</p>
         </div>
+        
+        {/* Session Expired Message */}
+        {isBot && message.sessionExpired && onNewChat && (
+          <div className="mt-2 border border-amber-200 rounded-lg p-3 bg-amber-50">
+            <p className="text-xs text-amber-800 mb-2">
+              Your session has expired after receiving the loan decision. Please start a new chat to continue.
+            </p>
+            <Button 
+              onClick={onNewChat}
+              size="sm"
+              variant="outline"
+              className="bg-white border-amber-300 hover:bg-amber-50 text-amber-800 text-xs"
+            >
+              <RefreshCw size={14} className="mr-1" />
+              Start New Chat
+            </Button>
+          </div>
+        )}
         
         {/* Bureau Decision Display */}
         {isBot && message.bureauDecision && (

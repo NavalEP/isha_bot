@@ -10,23 +10,28 @@ import { Message, BureauDecision } from "@/types/chat";
 import useApi from "@/hooks/useApi";
 
 interface ChatInterfaceProps {
-  sessionId?: string;
-  onSessionCreated?: (sessionId: string) => void;
+  initialMessage?: string;
+  sessionId?: string | null;
+  onNewChat?: () => void;
 }
 
-export default function ChatInterface({ sessionId: initialSessionId, onSessionCreated }: ChatInterfaceProps) {
+export default function ChatInterface({ 
+  initialMessage = "Hello! I'm here to assist you with your healthcare loan application. Let's get started.\n\nFirst, could you please provide me with the following details?\n1. Your full name\n2. Your phone number\n3. The cost of the treatment you are seeking\n4. Your monthly income",
+  sessionId = null,
+  onNewChat
+}: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
       type: "bot",
-      text: "Hello! I'm here to assist you with your healthcare loan application. Let's get started.\n\nFirst, could you please provide me with the following details?\n1. Your full name\n2. Your phone number\n3. The cost of the treatment you are seeking\n4. Your monthly income",
+      text: initialMessage,
       timestamp: new Date(),
     },
   ]);
   const [input, setInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [applicationProgress, setApplicationProgress] = useState(10);
-  const [sessionId, setSessionId] = useState<string | undefined>(initialSessionId);
+  const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(sessionId || undefined);
   const [connectionError, setConnectionError] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -36,19 +41,19 @@ export default function ChatInterface({ sessionId: initialSessionId, onSessionCr
 
   // Initialize chat session
   useEffect(() => {
-    // Only initialize session if it hasn't been initialized yet and no sessionId is provided
-    if (!sessionInitializedRef.current && !sessionId) {
+    // Only initialize session if it hasn't been initialized yet
+    if (!sessionInitializedRef.current && !currentSessionId) {
       sessionInitializedRef.current = true;
       initializeSession();
     }
-    // If a sessionId is provided, use it
-    else if (initialSessionId) {
-      setSessionId(initialSessionId);
-      // If we're loading an existing session, we should load its messages
-      loadSessionMessages(initialSessionId);
+  }, [currentSessionId]);
+
+  // Update currentSessionId when sessionId prop changes
+  useEffect(() => {
+    if (sessionId) {
+      setCurrentSessionId(sessionId);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialSessionId]);
+  }, [sessionId]);
 
   useEffect(() => {
     scrollToBottom();
@@ -57,55 +62,9 @@ export default function ChatInterface({ sessionId: initialSessionId, onSessionCr
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
-  
-  const loadSessionMessages = async (sessionId: string) => {
-    setIsProcessing(true);
-    setConnectionError(false);
-    
-    try {
-      // Get session status to check if it exists
-      const statusResponse = await api.getSessionStatus(sessionId);
-      
-      if (statusResponse.error) {
-        throw new Error(statusResponse.error);
-      }
-      
-      // For now, we'll just add a message indicating we've loaded a previous session
-      // In a real implementation, you'd fetch the session history from the backend
-      setMessages([
-        {
-          id: "loaded_session",
-          type: "bot",
-          text: "Previous session loaded. How can I help you continue with your loan application?",
-          timestamp: new Date(),
-        },
-      ]);
-      
-      console.log("Loaded existing session:", sessionId);
-    } catch (error) {
-      console.error("Error loading session:", error);
-      
-      const errorMessage: Message = {
-        id: `error_load`,
-        type: "bot",
-        text: error instanceof Error 
-          ? `Error loading session: ${error.message}` 
-          : "I'm sorry, there was an error loading the previous session. Let's start a new conversation.",
-        timestamp: new Date(),
-      };
-      
-      setMessages([errorMessage]);
-      
-      // If we can't load the session, initialize a new one
-      sessionInitializedRef.current = false;
-      initializeSession();
-    } finally {
-      setIsProcessing(false);
-    }
-  };
 
   const initializeSession = async () => {
-    if (isProcessing || sessionId) return;
+    if (isProcessing || currentSessionId) return;
     
     setIsProcessing(true);
     setConnectionError(false);
@@ -125,15 +84,8 @@ export default function ChatInterface({ sessionId: initialSessionId, onSessionCr
       }
       
       if (sessionResponse.data?.session_id) {
-        const newSessionId = sessionResponse.data.session_id;
-        setSessionId(newSessionId);
-        
-        // Notify parent component about the new session
-        if (onSessionCreated) {
-          onSessionCreated(newSessionId);
-        }
-        
-        console.log("Session initialized:", newSessionId);
+        setCurrentSessionId(sessionResponse.data.session_id);
+        console.log("Session initialized:", sessionResponse.data.session_id);
         // No need to send an initial message, the welcome message is already set
       }
     } catch (error) {
@@ -172,7 +124,7 @@ export default function ChatInterface({ sessionId: initialSessionId, onSessionCr
     
     try {
       const userInput = input;
-      const response = await api.sendChatMessage(userInput, sessionId);
+      const response = await api.sendChatMessage(userInput, currentSessionId);
       
       if (response.error) {
         // Check for connection issues
@@ -187,12 +139,19 @@ export default function ChatInterface({ sessionId: initialSessionId, onSessionCr
       
       // Update session ID if it's returned
       if (response.data?.session_id) {
-        setSessionId(response.data.session_id);
+        setCurrentSessionId(response.data.session_id);
       }
       
       // Check if response contains JSON (for bureau decision) 
       let responseText = response.data?.response || "I received your message.";
       let bureauDecision: BureauDecision | undefined = undefined;
+      let sessionExpired = false;
+      
+      // Check if session has expired
+      if (responseText.includes("Session has expired after loan decision")) {
+        sessionExpired = true;
+        console.log("Session expired after loan decision");
+      }
       
       try {
         // Try to parse the response as JSON
@@ -217,7 +176,8 @@ export default function ChatInterface({ sessionId: initialSessionId, onSessionCr
         type: "bot",
         text: responseText,
         timestamp: new Date(),
-        bureauDecision: bureauDecision
+        bureauDecision: bureauDecision,
+        sessionExpired: sessionExpired
       };
       
       setMessages((prev) => [...prev, botMessage]);
@@ -295,7 +255,7 @@ export default function ChatInterface({ sessionId: initialSessionId, onSessionCr
               exit={{ opacity: 0 }}
               transition={{ duration: 0.3 }}
             >
-              <ChatMessage message={message} />
+              <ChatMessage message={message} onNewChat={onNewChat} />
             </motion.div>
           ))}
         </AnimatePresence>

@@ -44,6 +44,8 @@ class VerifyOtpView(APIView):
     def post(self, request):
         phone_number = request.data.get('phone_number')
         otp = request.data.get('otp')
+        doctor_id = request.data.get('doctorId')
+        doctor_name = request.data.get('doctorName')
         
         if not phone_number or not otp:
             return Response(
@@ -70,26 +72,20 @@ class VerifyOtpView(APIView):
                 {"error": "Invalid OTP or server error"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Get doctor details
-        doctor_details_response = api_client.get_doctor_details(phone_number)
-        
-        # Extract doctor ID and name
-        doctor_id = None
-        doctor_name = None
-        
-        if doctor_details_response.get("status") == 200 and doctor_details_response.get("data"):
-            doctor_data = doctor_details_response.get("data")
-            doctor_id = doctor_data.get("doctorId")
-            doctor_name = doctor_data.get("name")
             
-        # Generate JWT token with doctor details
+        # Generate JWT token
         payload = {
             'phone_number': phone_number,
-            'doctor_id': doctor_id,
-            'doctor_name': doctor_name,
             'exp': datetime.datetime.utcnow() + datetime.timedelta(days=1)
         }
+        
+        # Only add doctor information to the payload if it exists
+        if doctor_id:
+            payload['doctor_id'] = doctor_id
+        
+
+        if doctor_name:
+            payload['doctor_name'] = doctor_name
         
         token = jwt.encode(
             payload, 
@@ -97,10 +93,18 @@ class VerifyOtpView(APIView):
             algorithm='HS256'
         )
         
-        return Response({
+        response_data = {
             "message": "OTP verified successfully",
             "token": token,
-            "phone_number": phone_number,
-            "doctor_id": doctor_id,
-            "doctor_name": doctor_name
-        }, status=status.HTTP_200_OK)
+            "phone_number": phone_number
+        }
+        print(response_data)
+        
+        # Only include doctor information in the response if it exists
+        if doctor_id:
+            response_data["doctor_id"] = doctor_id
+        
+        if doctor_name:
+            response_data["doctor_name"] = doctor_name
+        
+        return Response(response_data, status=status.HTTP_200_OK)

@@ -19,6 +19,8 @@ setup_environment()
 
 from cpapp.services.agent import CarepayAgent
 from cpapp.api.login.authentication import JWTAuthentication
+import jwt
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -38,19 +40,24 @@ class ChatSessionView(APIView):
             # Get phone number from authenticated user
             phone_number = request.user
             
-            # Get doctor details from authentication info
-            auth_info = request.auth
-            doctor_id = auth_info.get('doctor_id') if isinstance(auth_info, dict) else None
-            doctor_name = auth_info.get('doctor_name') if isinstance(auth_info, dict) else None
+            # Extract doctor information from the JWT token
+            doctor_id = None
+            doctor_name = None
             
-            session_id = carepay_agent.create_session()
+            # Get the token from the Authorization header
+            auth_header = request.META.get('HTTP_AUTHORIZATION')
+            if auth_header:
+                try:
+                    token = auth_header.split(' ')[1]
+                    payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+                    doctor_id = payload.get('doctor_id')
+                    doctor_name = payload.get('doctor_name')
+                    logger.info(f"Extracted doctor_id: {doctor_id}, doctor_name: {doctor_name} from JWT token")
+                except Exception as e:
+                    logger.error(f"Error extracting doctor info from token: {e}")
             
-            # Store doctor details in the session if available
-            if doctor_id and doctor_name:
-                carepay_agent.sessions[session_id]["data"]["doctor_id"] = doctor_id
-                carepay_agent.sessions[session_id]["data"]["doctor_name"] = doctor_name
-                print(f"Stored doctor details in session: doctor_id={doctor_id}, doctor_name={doctor_name}")
-            
+            # Create session with doctor information
+            session_id = carepay_agent.create_session(doctor_id=doctor_id, doctor_name=doctor_name, phone_number=phone_number)
             print(f"session_id: {session_id} created_at: {datetime.datetime.now()} by user: {phone_number}")
             return Response({
                 "status": "success",
@@ -77,11 +84,6 @@ class ChatMessageView(APIView):
             # Get phone number from authenticated user
             phone_number = request.user
             
-            # Get doctor details from authentication info
-            auth_info = request.auth
-            doctor_id = auth_info.get('doctor_id') if isinstance(auth_info, dict) else None
-            doctor_name = auth_info.get('doctor_name') if isinstance(auth_info, dict) else None
-            
             # Extract data from request
             session_id = request.data.get("session_id")
             message = request.data.get("message")
@@ -92,12 +94,6 @@ class ChatMessageView(APIView):
                     "status": "error",
                     "message": "session_id and message are required"
                 }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Update doctor details in the session if available
-            if doctor_id and doctor_name and session_id in carepay_agent.sessions:
-                carepay_agent.sessions[session_id]["data"]["doctor_id"] = doctor_id
-                carepay_agent.sessions[session_id]["data"]["doctor_name"] = doctor_name
-            
             print(f"session_id: {session_id}")  
             print(f"message: {message}")
             print(f"user: {phone_number}")
@@ -144,13 +140,23 @@ class SessionStatusView(APIView):
             # Parse session data
             session_data = json.loads(session_data)
             
-            # Return session status
-            return Response({
+            # Prepare response data
+            response_data = {
                 "status": "success",
                 "session_id": session_id,
                 "session_status": session_data.get("status"),
                 "user_id": session_data.get("user_id")
-            }, status=status.HTTP_200_OK)
+            }
+            
+            # Add doctor information if available
+            if "data" in session_data and session_data["data"].get("doctor_id"):
+                response_data["doctor_id"] = session_data["data"].get("doctor_id")
+            
+            if "data" in session_data and session_data["data"].get("doctor_name"):
+                response_data["doctor_name"] = session_data["data"].get("doctor_name")
+            
+            # Return session status with doctor info
+            return Response(response_data, status=status.HTTP_200_OK)
         except Exception as e:
             logger.error(f"Error getting session status: {e}")
             return Response({

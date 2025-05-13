@@ -1,13 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  images: { unoptimized: true },
+  reactStrictMode: true,
   env: {
-    CAREPAY_API_URL: 'http://localhost:8000/api/v1/agent',
-    NEXT_PUBLIC_CAREPAY_API_URL: 'http://localhost:8000/api/v1/agent',
+    BACKEND_URL: process.env.BACKEND_URL || 'http://localhost:8000',
   },
+  output: 'standalone',
 };
 
 module.exports = nextConfig;

@@ -14,8 +14,8 @@ class CarepayAPIClient:
     def __init__(self):
         self.base_url = os.getenv('CAREPAY_API_BASE_URL', 'https://backend.carepay.money')
         # Default doctor details that can be overridden with actual values from API
-        self.doctor_id = os.getenv('DOCTOR_ID', 'e71779851b144d1d9a25a538a03612fc')
-        self.doctor_name = os.getenv('DOCTOR_NAME', 'Nikhil_Salkar')
+        self.doctor_id = os.getenv('DOCTOR_ID', None)
+        self.doctor_name = os.getenv('DOCTOR_NAME', None)
         # Flag to track if we have actual doctor details
         self.has_doctor_details = False
         
@@ -118,8 +118,8 @@ class CarepayAPIClient:
                 self.doctor_id = doctor_data.get("doctorId")
                 logger.info(f"Updated doctor_id to {self.doctor_id}")
             
-            if doctor_data.get("doctorName"):
-                self.doctor_name = doctor_data.get("doctorName")
+            if doctor_data.get("name"):
+                self.doctor_name = doctor_data.get("name")
                 logger.info(f"Updated doctor_name to {self.doctor_name}")
             
             self.has_doctor_details = True
@@ -201,17 +201,21 @@ class CarepayAPIClient:
         }
         return self._make_request('POST', endpoint, data=data)
     
-    def save_loan_details(self, user_id: str, name: str, loan_amount: int) -> Dict[str, Any]:
+    def save_loan_details(self, user_id: str, name: str, loan_amount: int, doctor_name: str = None, doctor_id: str = None) -> Dict[str, Any]:
         """Save loan details"""
         endpoint = f"userDetails/saveLoanDetails"
         
+        # Use provided doctor details if available, otherwise use instance variables
+        doctor_id_to_use = doctor_id if doctor_id is not None else self.doctor_id
+        doctor_name_to_use = doctor_name if doctor_name is not None else self.doctor_name
+        
         # Log a warning if we're using default doctor details
-        if not self.has_doctor_details:
+        if not self.has_doctor_details and doctor_id is None and doctor_name is None:
             logger.warning("Using default doctor details. Call get_doctor_details first to use actual details.")
             
         data = {
-            "doctorId": self.doctor_id,
-            "doctorName": self.doctor_name,
+            "doctorId": doctor_id_to_use,
+            "doctorName": doctor_name_to_use,
             "formStatus": "",
             "loanAmount": loan_amount,
             "treatmentAmount": loan_amount,
