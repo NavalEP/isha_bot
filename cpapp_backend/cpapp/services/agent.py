@@ -923,8 +923,8 @@ class CarepayAgent:
             loan_amount = data.get("treatmentCost")
             
             # Get doctor details from session if available
-            doctor_id = None
-            doctor_name = None
+            doctor_id = "e71779851b144d1d9a25a538a03612fc"
+            doctor_name = "Nikhil_Salkar"
             
             if hasattr(self, '_current_session_id'):
                 session = self.sessions.get(self._current_session_id)
