@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 // API base URL from environment variable with fallback
-const API_BASE_URL = process.env.CAREPAY_API_URL || 'http://localhost:8000';  
+const API_BASE_URL = process.env.CAREPAY_API_URL || 'http://34.131.33.60/api/';  
 
 // Send a message
 export async function POST(request: Request) {
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
-    const response = await fetch(`${API_BASE_URL}api/v1/agent/message/`, {
+    const response = await fetch(`${API_BASE_URL}v1/agent/message/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
