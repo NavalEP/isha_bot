@@ -21,6 +21,8 @@ from cpapp.services.agent import CarepayAgent
 from cpapp.api.login.authentication import JWTAuthentication
 import jwt
 from django.conf import settings
+from cpapp.models.session_data import SessionData
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -114,51 +116,91 @@ class ChatMessageView(APIView):
                 "message": str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
-class SessionStatusView(APIView):
+class SessionDetailsView(APIView):
     """
-    View for retrieving session status
+    View for handling session details with UUID - either retrieves existing active session or creates new one
     """
     authentication_classes = [JWTAuthentication]
-  
     
-    def get(self, request, session_id):
+    def get(self, request, session_uuid):
         try:
             # Get phone number from authenticated user
             phone_number = request.user
             
-            # Get session data
-            session_data = carepay_agent.get_session_data(session_id)
-            
-            # Check if session exists
-            if session_data == "Session ID not found":
+            try:
+                # Try to parse the UUID to validate format
+                session_uuid = UUID(session_uuid)
+            except ValueError:
                 return Response({
                     "status": "error",
-                    "message": "Session not found"
-                }, status=status.HTTP_404_NOT_FOUND)
+                    "message": "Invalid UUID format"
+                }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Parse session data
-            session_data = json.loads(session_data)
-            
-            # Prepare response data
-            response_data = {
-                "status": "success",
-                "session_id": session_id,
-                "session_status": session_data.get("status"),
-                "user_id": session_data.get("user_id")
-            }
-            
-            # Add doctor information if available
-            if "data" in session_data and session_data["data"].get("doctor_id"):
-                response_data["doctor_id"] = session_data["data"].get("doctor_id")
-            
-            if "data" in session_data and session_data["data"].get("doctor_name"):
-                response_data["doctor_name"] = session_data["data"].get("doctor_name")
-            
-            # Return session status with doctor info
-            return Response(response_data, status=status.HTTP_200_OK)
+            # Try to find existing active session
+            try:
+                session = SessionData.objects.get(
+                    session_id=session_uuid,
+                    status='active',
+                    phone_number=phone_number
+                )
+                
+                # Return existing session data
+                return Response({
+                    "status": "success",
+                    "session_id": str(session.session_id),
+                    "data": {
+                        "fullName": session.data.get("fullName"),
+                        "phoneNumber": session.phone_number,
+                        "bureau_decision_details": session.data.get("bureau_decision_details"),
+                        "status": session.status
+                    },
+                    "created_at": session.created_at,
+                    "updated_at": session.updated_at
+                }, status=status.HTTP_200_OK)
+                
+            except SessionData.DoesNotExist:
+                # Create new session since existing one not found
+                # Extract doctor information from the JWT token
+                doctor_id = None
+                doctor_name = None
+                
+                # Get the token from the Authorization header
+                auth_header = request.META.get('HTTP_AUTHORIZATION')
+                if auth_header:
+                    try:
+                        token = auth_header.split(' ')[1]
+                        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+                        doctor_id = payload.get('doctor_id')
+                        doctor_name = payload.get('doctor_name')
+                    except Exception as e:
+                        logger.error(f"Error extracting doctor info from token: {e}")
+                
+                # Create new session
+                new_session = SessionData.objects.create(
+                    phone_number=phone_number,
+                    session_id=session_uuid,
+                    status='active',
+                    data={
+                        'doctor_id': doctor_id,
+                        'doctor_name': doctor_name
+                    }
+                )
+                
+                return Response({
+                    "status": "success",
+                    "message": "New session created",
+                    "session_id": str(new_session.session_id),
+                    "data": {
+                        "fullName": new_session.data.get("fullName"),
+                        "phoneNumber": new_session.phone_number,
+                        "bureau_decision_details": new_session.data.get("bureau_decision_details"),
+                        "status": new_session.status
+                    },
+                    "created_at": new_session.created_at
+                }, status=status.HTTP_201_CREATED)
+                
         except Exception as e:
-            logger.error(f"Error getting session status: {e}")
+            logger.error(f"Error processing session details: {e}")
             return Response({
                 "status": "error",
                 "message": str(e)

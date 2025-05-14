@@ -10,7 +10,6 @@ class SessionData(models.Model):
     phone_number = models.CharField(max_length=10, null=True, blank=True)
     application_id = models.UUIDField(default=uuid.uuid4, editable=False)
     session_id = models.UUIDField(default=uuid.uuid4, editable=False)
-    user_id = models.UUIDField(null=True, blank=True)
     data = models.JSONField(null=True, blank=True)
     history = models.JSONField(null=True, blank=True)
     status = models.CharField(max_length=50, null=True, blank=True)
@@ -22,7 +21,6 @@ class SessionData(models.Model):
         indexes = [
             models.Index(fields=['application_id']),
             models.Index(fields=['session_id']),
-            models.Index(fields=['user_id']),
         ]
 
     def __str__(self):
