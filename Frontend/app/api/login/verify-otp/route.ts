@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     if (doctorName) console.log("With doctorName:", doctorName);
     
     // Use a hardcoded URL for now to troubleshoot
-    const backendUrl = "http://localhost:8000";
+    const API_BASE_URL = process.env.CAREPAY_API_URL || 'http://localhost:8000';  
     
     // Only include doctor information in the request if it exists
     const requestBody: any = { phone_number, otp };
@@ -25,7 +25,7 @@ export async function POST(req: Request) {
     if (doctorName) requestBody.doctorName = doctorName;
     
     // Forward the request to the backend API
-    const response = await fetch(`${backendUrl}/api/v1/agent/login/verify-otp/`, {
+    const response = await fetch(`${API_BASE_URL}api/v1/agent/login/verify-otp/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

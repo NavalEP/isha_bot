@@ -14,10 +14,10 @@ export async function POST(req: Request) {
     console.log("Sending OTP request to backend for phone:", phone_number);
     
     // Use a hardcoded URL for now to troubleshoot
-    const backendUrl = "http://localhost:8000";
+    const API_BASE_URL = process.env.CAREPAY_API_URL || 'http://localhost:8000';  
     
     // Forward the request to the backend API
-    const response = await fetch(`${backendUrl}/api/v1/agent/login/send-otp/`, {
+    const response = await fetch(`${API_BASE_URL}api/v1/agent/login/send-otp/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
