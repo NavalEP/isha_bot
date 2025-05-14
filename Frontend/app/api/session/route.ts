@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 
 // API base URL from environment variable with fallback
-const API_BASE_URL ='http://34.131.33.60/api/';
+// const API_BASE_URL ='';
 
 // Create a new session
 export async function POST() {
   try {
-    const response = await fetch(`${API_BASE_URL}v1/agent/session/`, {
+    const response = await fetch(`http://34.131.33.60/api/v1/agent/session/`, {
       method: 'POST',
       headers: {
         // 'Authorization': `Bearer ${yourJWTToken}`,
