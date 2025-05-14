@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 // API base URL from environment variable with fallback
-const API_BASE_URL = process.env.CAREPAY_API_URL || 'http://34.131.33.60/api/';  
+const API_BASE_URL ='http://34.131.33.60/api/';  
 
 // Send a message
 export async function POST(request: Request) {

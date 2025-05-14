@@ -3,7 +3,7 @@ import { ChatResponse } from '@/types/chat';
 import { useAuth } from './useAuth';
 
 // Direct API URL to Django backend
-const API_BASE_URL = process.env.CAREPAY_API_URL || 'http://localhost:8000/api/v1/agent';
+const API_BASE_URL ='http://localhost:8000/api/v1/agent';
 
 interface ApiResponse<T> {
   data: T | null;
