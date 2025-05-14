@@ -36,7 +36,7 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/login/send-otp", {
+      const response = await fetch("/api/v1/agent/login/send-otp", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -83,7 +83,7 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/login/verify-otp", {
+      const response = await fetch("/api/v1/agent/login/verify-otp", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
