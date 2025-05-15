@@ -156,6 +156,7 @@ CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     # 'http://34.131.46.229/',
+    'http://localhost:5173',
 ]
 
 CORS_ALLOW_METHODS = [
