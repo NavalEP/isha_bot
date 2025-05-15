@@ -25,9 +25,7 @@ export async function POST(req: Request) {
 
     const response = await fetch(backendUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
     });
 
@@ -38,7 +36,7 @@ export async function POST(req: Request) {
       data = await response.json();
       console.log("Backend response data:", data);
     } catch (jsonError) {
-      console.error("Failed to parse JSON response");
+      console.error("Failed to parse JSON response:", jsonError);
       const text = await response.text();
       console.log("Raw response:", text);
       return NextResponse.json(
@@ -55,16 +53,17 @@ export async function POST(req: Request) {
     }
 
     const cookieStore = cookies();
+    const isProd = process.env.NODE_ENV === 'production';
+
     const cookieOptions = {
       httpOnly: true,
-      secure: false,
-      maxAge: 7 * 24 * 60 * 60,
+      secure: isProd,               // Secure cookie only in production
+      maxAge: 7 * 24 * 60 * 60,    // 7 days
       path: '/',
       sameSite: 'strict' as const,
     };
 
     console.log("Setting cookies...");
-
     cookieStore.set('auth_token', data.token, cookieOptions);
     cookieStore.set('phone_number', phone_number, cookieOptions);
 
