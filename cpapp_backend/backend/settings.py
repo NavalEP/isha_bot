@@ -182,15 +182,15 @@ CORS_ALLOW_HEADERS = [
     "x-requested-with",
 ]
 
-CORS_ALLOW_ALL_ORIGINS = os.getenv('CORS_ALLOW_ALL_ORIGINS', 'False').lower() == 'true'
+# CORS_ALLOW_ALL_ORIGINS = os.getenv('CORS_ALLOW_ALL_ORIGINS', 'False').lower() == 'true'
 
-cors_methods_str = os.getenv('CORS_ALLOW_METHODS', '')
-if cors_methods_str:
-    CORS_ALLOW_METHODS = [method.strip().upper() for method in cors_methods_str.split(',')]
+# cors_methods_str = os.getenv('CORS_ALLOW_METHODS', '')
+# if cors_methods_str:
+#     CORS_ALLOW_METHODS = [method.strip().upper() for method in cors_methods_str.split(',')]
 
-cors_headers_str = os.getenv('CORS_ALLOW_HEADERS', '')
-if cors_headers_str:
-    CORS_ALLOW_HEADERS = [header.strip().lower() for header in cors_headers_str.split(',')]
+# cors_headers_str = os.getenv('CORS_ALLOW_HEADERS', '')
+# if cors_headers_str:
+#     CORS_ALLOW_HEADERS = [header.strip().lower() for header in cors_headers_str.split(',')]
 
 # REST Framework settings
 REST_FRAMEWORK = {
