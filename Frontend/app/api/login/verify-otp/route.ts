@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 
 export async function POST(req: Request) {
   try {
@@ -13,10 +12,6 @@ export async function POST(req: Request) {
     }
 
     console.log("Hit /api/login/verify-otp route");
-    console.log("Verifying OTP for:", phone_number);
-    if (doctorId) console.log("doctorId:", doctorId);
-    if (doctorName) console.log("doctorName:", doctorName);
-
     const requestBody: Record<string, any> = { phone_number, otp };
     if (doctorId) requestBody.doctorId = doctorId;
     if (doctorName) requestBody.doctorName = doctorName;
@@ -35,54 +30,34 @@ export async function POST(req: Request) {
     try {
       data = await response.json();
       console.log("Backend response data:", data);
-    } catch (jsonError) {
-      console.error("Failed to parse JSON response:", jsonError);
+    } catch {
       const text = await response.text();
-      console.log("Raw response:", text);
-      return NextResponse.json(
-        { error: 'Invalid response from server' },
-        { status: 500 }
-      );
+      console.error("Failed to parse JSON response. Raw:", text);
+      return NextResponse.json({ error: 'Invalid response from server' }, { status: 500 });
     }
 
     if (!response.ok) {
-      return NextResponse.json(
-        { error: data.error || 'Invalid OTP' },
-        { status: response.status }
-      );
+      return NextResponse.json({ error: data.error || 'Invalid OTP' }, { status: response.status });
     }
 
-    const cookieStore = cookies();
-    const isProd = process.env.NODE_ENV === 'production';
+    // ✅ Set cookies via response headers so middleware can see them
+    const cookieOptions = `Path=/; HttpOnly; Max-Age=604800; SameSite=Strict`;
 
-    const cookieOptions = {
-      httpOnly: true,
-      secure: isProd,               // Secure cookie only in production
-      maxAge: 7 * 24 * 60 * 60,    // 7 days
-      path: '/',
-      sameSite: 'strict' as const,
-    };
-
-    console.log("Setting cookies...");
-    cookieStore.set('auth_token', data.token, cookieOptions);
-    cookieStore.set('phone_number', phone_number, cookieOptions);
-
-    if (doctorId) cookieStore.set('doctor_id', doctorId, cookieOptions);
-    if (doctorName) cookieStore.set('doctor_name', doctorName, cookieOptions);
-
-    return NextResponse.json({
+    const res = NextResponse.json({
       message: "OTP verified successfully",
-      token: data.token,
-      phone_number,
-      ...(doctorId && { doctorId }),
-      ...(doctorName && { doctorName }),
     });
+
+    res.headers.append('Set-Cookie', `auth_token=${data.token}; ${cookieOptions}`);
+    res.headers.append('Set-Cookie', `phone_number=${phone_number}; ${cookieOptions}`);
+    if (doctorId) res.headers.append('Set-Cookie', `doctor_id=${doctorId}; ${cookieOptions}`);
+    if (doctorName) res.headers.append('Set-Cookie', `doctor_name=${doctorName}; ${cookieOptions}`);
+
+    console.log("✅ Cookies set in response headers");
+
+    return res;
 
   } catch (error) {
     console.error('Error in verify-otp route:', error);
-    return NextResponse.json(
-      { error: 'Something went wrong' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Something went wrong' }, { status: 500 });
   }
 }
