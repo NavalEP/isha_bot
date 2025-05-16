@@ -421,7 +421,7 @@ class CarepayAgent:
         
         except Exception as e:
             logger.error(f"Error processing message: {e}")
-            return "An error occurred while processing your message. Please try again."
+            return "I apologize, but I encountered an error. Please start a new chat session to continue our conversation."
 
     def get_session_data(self, session_id: str = None) -> str:
         """
