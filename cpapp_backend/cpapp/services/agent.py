@@ -332,7 +332,19 @@ class CarepayAgent:
         try:
             # Validate session_id
             if session_id not in self.sessions:
-                return "Session expired or not found. Please refresh the page to start a new session."
+                # Try to load from database
+                try:
+                    session_data = SessionData.objects.get(session_id=session_id)
+                    if session_data:
+                        # Restore session from database
+                        self.sessions[session_id] = {
+                            "id": str(session_data.session_id),
+                            "data": session_data.data or {},
+                            "history": session_data.history or [],
+                            "status": session_data.status or "initial"
+                        }
+                except SessionData.DoesNotExist:
+                    return "Session expired or not found. Please refresh the page to start a new session."
             
             # Set current session for helper methods
             self._current_session_id = session_id
@@ -341,10 +353,10 @@ class CarepayAgent:
             session = self.sessions[session_id]
             current_status = session.get("status", "initial")
             
-            # Check if session is marked as expired
-            if current_status == "expired":
+            # Only check for expiration if user has confirmed they've reviewed the decision
+            if current_status == "expired" and "decision_reviewed" in session.get("data", {}):
                 return "Session has expired after loan decision. Please start a new chat to continue."
-                
+            
             phone = session.get("data", {}).get("phone", None)
             
             logger.info(f"Processing message in session {session_id} with status {current_status} and phone {phone}")
@@ -352,6 +364,13 @@ class CarepayAgent:
             # Add user message to history
             chat_history = session.get("history", [])
             
+            # Check if this is an acknowledgment of bureau decision review
+            if current_status == "bureau_decision_sent" and any(keyword in message.lower() for keyword in ["understood", "ok", "thank", "got it", "received"]):
+                session["data"]["decision_reviewed"] = True
+                session["status"] = "expired"
+                self.save_session_to_db(session_id)
+                return "Thank you for reviewing the loan decision. This session will now close. Please start a new chat if you need anything else."
+
             chat_history.append(HumanMessage(content=message))
             
             # Use LLM to generate response
@@ -382,166 +401,15 @@ class CarepayAgent:
             ai_message = response.get("output", "I don't know how to respond to that.")
             chat_history.append(AIMessage(content=ai_message))
             
-            # Check if this is a bureau decision response based on content patterns
+            # Check if this is a bureau decision response
             if "bureau decision" in ai_message.lower() and any(plan in ai_message for plan in ["Plan:", "Plan", "EMI:", "/0", "/5", "/1"]):
-                try:
-                    # Extract EMI plan information
-                    emi_plans = []
-                    bureau_decision = None
-                    decision_reason = None
-                    max_eligible_emi = None
-                    
-                    # Extract bureau decision status if present
-                    bureau_match = re.search(r"Bureau Decision:\s*(\w+(?:_\w+)*)", ai_message)
-                    if bureau_match:
-                        bureau_decision = bureau_match.group(1)
-                    
-                    # Extract decision reason if present
-                    reason_match = re.search(r"Decision Reason:\s*([^•\n]+)", ai_message)
-                    if reason_match:
-                        decision_reason = reason_match.group(1).strip()
-                    
-                    # Extract maximum eligible EMI with improved pattern matching
-                    # Try multiple patterns for max eligible EMI
-                    emi_patterns = [
-                        r"Maximum Eligible EMI:\s*₹?([\d,]+(?:\.\d+)?)",
-                        r"Max[.]*\s*Eligible EMI:\s*₹?([\d,]+(?:\.\d+)?)",
-                        r"Maximum EMI Eligible:\s*₹?([\d,]+(?:\.\d+)?)",
-                        r"Eligible EMI:\s*₹?([\d,]+(?:\.\d+)?)",
-                        r"Eligible EMI[^:]*:\s*₹?([\d,]+(?:\.\d+)?)",
-                        r"EMI Eligibility:\s*₹?([\d,]+(?:\.\d+)?)"
-                    ]
-                    
-                    for pattern in emi_patterns:
-                        emi_match = re.search(pattern, ai_message, re.IGNORECASE)
-                        if emi_match:
-                            max_eligible_emi = emi_match.group(1).replace(',', '')
-                            break
-                            
-                    # If still not found, try to find any number after "eligible" and before "EMI"
-                    if not max_eligible_emi:
-                        general_emi_match = re.search(r"eligible[^₹\d]*[^\w]₹?([\d,]+(?:\.\d+)?)", ai_message, re.IGNORECASE)
-                        if general_emi_match:
-                            max_eligible_emi = general_emi_match.group(1).replace(',', '')
-                    
-                    # Extract all plan details using regex (for internal use, not display)
-                    plan_pattern = r"(?:(\d+)/(\d+)(?:\s*([A-Z]+))?\s+Plan:?)\s*(?:Credit Limit:?\s*₹?([\d,]+(?:\.\d+)?))?(?:.*?EMI:?\s*₹?([\d,]+(?:\.\d+)?))?(?:.*?Down Payment:?\s*₹?([\d,]+(?:\.\d+)?))?|(?:(?:EMI:?\s*₹?([\d,]+(?:\.\d+)?))?\s*(?:Credit Limit:?\s*₹?([\d,]+(?:\.\d+)?))?(?:.*?Down Payment:?\s*₹?([\d,]+(?:\.\d+)?))?\s*(\d+)/(\d+)(?:\s*([A-Z]+))?\s+Plan:?)"
-                    
-                    plans = re.finditer(plan_pattern, ai_message)
-                    for plan in plans:
-                        groups = plan.groups()
-                        
-                        # Handle both formats (plan first or EMI first)
-                        if groups[0]:  # If first capture group exists, it's in the first format
-                            tenure = groups[0]
-                            interest = groups[1] 
-                            plan_type = groups[2] or ""
-                            credit_limit = groups[3].replace(',', '') if groups[3] else None
-                            emi = groups[4].replace(',', '') if groups[4] else None
-                            down_payment = groups[5].replace(',', '') if groups[5] else None
-                        else:  # Otherwise it's in the second format
-                            emi = groups[6].replace(',', '') if groups[6] else None
-                            credit_limit = groups[7].replace(',', '') if groups[7] else None
-                            down_payment = groups[8].replace(',', '') if groups[8] else None
-                            tenure = groups[9]
-                            interest = groups[10]
-                            plan_type = groups[11] or ""
-                        
-                        emi_plans.append({
-                            "planName": f"{tenure}/{interest}{' ' + plan_type if plan_type else ''}",
-                            "creditLimit": credit_limit,
-                            "emi": emi,
-                            "downPayment": down_payment or "0"
-                        })
-                    
-                    # If no plans were found with regex, try alternative approach with line splitting
-                    if not emi_plans:
-                        for line in ai_message.split('\n'):
-                            plan_match = re.search(r"(\d+)/(\d+)\s*([A-Z]*)\s*Plan", line)
-                            if plan_match:
-                                tenure, interest, plan_type = plan_match.groups()
-                                plan_type = plan_type.strip()
-                                
-                                credit_match = re.search(r"Credit Limit:?\s*₹?([\d,]+(?:\.\d+)?)", line)
-                                credit_limit = credit_match.group(1).replace(',', '') if credit_match else None
-                                
-                                emi_match = re.search(r"EMI:?\s*₹?([\d,]+(?:\.\d+)?)", line)
-                                emi = emi_match.group(1).replace(',', '') if emi_match else None
-                                
-                                down_match = re.search(r"Down Payment:?\s*₹?([\d,]+(?:\.\d+)?)", line)
-                                down_payment = down_match.group(1).replace(',', '') if down_match else None
-                                
-                                emi_plans.append({
-                                    "planName": f"{tenure}/{interest}{' ' + plan_type if plan_type else ''}",
-                                    "creditLimit": credit_limit,
-                                    "emi": emi,
-                                    "downPayment": down_payment or "0"
-                                })
-                    
-                    # If we have EMI plans but no max eligible EMI, use the highest EMI from plans
-                    if not max_eligible_emi and emi_plans:
-                        highest_emi = max(
-                            (float(plan["emi"]) for plan in emi_plans if plan["emi"] is not None),
-                            default=None
-                        )
-                        if highest_emi:
-                            max_eligible_emi = str(int(highest_emi))
-                    
-                    # Get user's name from session if available
-                    user_name = "Customer"
-                    if hasattr(self, '_current_session_id'):
-                        session = self.sessions.get(self._current_session_id)
-                        if session and "data" in session:
-                            session_data = session["data"]
-                            if "name" in session_data:
-                                user_name = session_data["name"]
-                            elif "fullName" in session_data:
-                                user_name = session_data["fullName"]
-                            # Try to get first name if full name is available
-                            if " " in user_name:
-                                user_name = user_name.split(" ")[0]
-                    
-                    # Create simplified decision message with clean format
-                    decision_message = ""
-                    if bureau_decision:
-                        logger.info(f"Processing bureau decision for frontend display: {bureau_decision}")
-                        if bureau_decision.upper() == "APPROVED":
-                            decision_message = f"### Loan Application Decision:\n\n🎉 Congratulations, {user_name}! Your loan application has been **APPROVED**."
-                        elif bureau_decision.upper() == "REJECTED":
-                            reason_text = decision_reason if decision_reason else "Insufficient credit score or eligibility"
-                            decision_message = f"### Loan Application Decision:\n\nWe regret to inform you that your loan application has been **REJECTED**.\nReason: {reason_text}"
-                        elif "INCOME" in bureau_decision.upper() and "VERIFICATION" in bureau_decision.upper():
-                            decision_message = f"### Loan Application Decision:\n\nYour application requires **INCOME VERIFICATION**. Please submit additional income documents to proceed."
-                        else:
-                            decision_message = f"### Loan Application Decision:\n\nYour loan application status is: **{bureau_decision}**."
-                    
-                    # Create formatted response - now with simpler structure for frontend
-                    formatted_response = {
-                        "bureauDecision": {
-                            "status": bureau_decision,
-                            "reason": decision_reason,
-                            "maxEligibleEMI": max_eligible_emi,
-                            "emiPlans": emi_plans,
-                            "customerName": user_name,
-                            "decisionMessage": decision_message
-                        },
-                        "message": ai_message
-                    }
-                    
-                    # Mark the session for expiration since we've returned a loan decision
-                    self.sessions[session_id]["status"] = "expired"
-                    logger.info(f"Session {session_id} marked as expired after returning loan decision")
-                    
-                    # Save the expired status to database
-                    self.save_session_to_db(session_id)
-                    
-                    # Return the formatted response as JSON string
-                    return json.dumps(formatted_response)
-                    
-                except Exception as e:
-                    logger.error(f"Error formatting bureau decision: {e}")
-                    # Fall back to standard response if formatting fails
-            
+                # Instead of immediately expiring, mark as decision sent
+                session["status"] = "bureau_decision_sent"
+                logger.info(f"Session {session_id} marked as bureau_decision_sent")
+                
+                # Add prompt for user acknowledgment
+                ai_message += "\n\nPlease confirm that you've reviewed the loan decision by saying 'Understood' or 'OK'."
+
             # Save updated history to session
             session["history"] = chat_history
             self.sessions[session_id] = session
@@ -552,8 +420,8 @@ class CarepayAgent:
             return ai_message
         
         except Exception as e:
-            logger.error(f"Error in agent run: {e}")
-            return f"Sorry, I encountered an error: {str(e)}"
+            logger.error(f"Error processing message: {e}")
+            return "An error occurred while processing your message. Please try again."
 
     def get_session_data(self, session_id: str = None) -> str:
         """
@@ -1496,7 +1364,7 @@ class CarepayAgent:
                     'phone_number': session.get('phone_number', None),
                     'data': session.get('data', {}),
                     'history': session.get('history', []),
-                    'status': session.get('status', 'initial')
+                    'status': session.get('status', 'active')
                 }
             )
             

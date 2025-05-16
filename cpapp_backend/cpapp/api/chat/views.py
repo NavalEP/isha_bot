@@ -102,6 +102,7 @@ class ChatMessageView(APIView):
             
             # Process message with agent
             response = carepay_agent.run(session_id, message)
+            print(f"response: {response}")
             
             # Return response
             return Response({
@@ -120,88 +121,76 @@ class SessionDetailsView(APIView):
     """
     View for handling session details with UUID - either retrieves existing active session or creates new one
     """
-    authentication_classes = [JWTAuthentication]
     
     def get(self, request, session_uuid):
+        """
+        Get session details by UUID
+        """
         try:
-            # Get phone number from authenticated user
-            phone_number = request.user
-            
+            # Convert string UUID to UUID object
             try:
-                # Try to parse the UUID to validate format
                 session_uuid = UUID(session_uuid)
-            except ValueError:
+            except (ValueError, TypeError):
                 return Response({
                     "status": "error",
-                    "message": "Invalid UUID format"
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Try to find existing active session
+                    "message": "Invalid session ID format"
+                }, status=400)
+
             try:
-                session = SessionData.objects.get(
-                    session_id=session_uuid,
-                    status='active',
-                    phone_number=phone_number
-                )
-                
-                # Return existing session data
-                return Response({
-                    "status": "success",
-                    "session_id": str(session.session_id),
-                    "data": {
+                # Try to find existing active session
+                try:
+                    session = SessionData.objects.get(
+                        session_id=session_uuid,
+                    )
+                    
+                    # Return existing session data
+                    return Response({
+                        "status": "success",
+                        "session_id": str(session.session_id),
+                        "data": session.data,
                         "fullName": session.data.get("fullName"),
                         "phoneNumber": session.phone_number,
                         "bureau_decision_details": session.data.get("bureau_decision_details"),
-                        "status": session.status
-                    },
-                    "created_at": session.created_at,
-                    "updated_at": session.updated_at
-                }, status=status.HTTP_200_OK)
-                
-            except SessionData.DoesNotExist:
-                # Create new session since existing one not found
-                # Extract doctor information from the JWT token
-                doctor_id = None
-                doctor_name = None
-                
-                # Get the token from the Authorization header
-                auth_header = request.META.get('HTTP_AUTHORIZATION')
-                if auth_header:
-                    try:
-                        token = auth_header.split(' ')[1]
-                        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
-                        doctor_id = payload.get('doctor_id')
-                        doctor_name = payload.get('doctor_name')
-                    except Exception as e:
-                        logger.error(f"Error extracting doctor info from token: {e}")
-                
-                # Create new session
-                new_session = SessionData.objects.create(
-                    phone_number=phone_number,
-                    session_id=session_uuid,
-                    status='active',
-                    data={
-                        'doctor_id': doctor_id,
-                        'doctor_name': doctor_name
-                    }
-                )
-                
-                return Response({
-                    "status": "success",
-                    "message": "New session created",
-                    "session_id": str(new_session.session_id),
-                    "data": {
+                        "status": session.status,
+                        "message": None,
+                        "created_at": session.created_at,
+                        "updated_at": session.updated_at
+                    })
+
+                except SessionData.DoesNotExist:
+                    # Create new session since existing one not found
+                    new_session = SessionData.objects.create(
+                        phone_number=None,  # Will be set later
+                        session_id=session_uuid,
+                        data={},
+                        history=[],
+                        status="initial"
+                    )
+                    
+                    return Response({
+                        "status": "success",
+                        "message": "New session created",
+                        "session_id": str(new_session.session_id),
+                        "data": new_session.data,
                         "fullName": new_session.data.get("fullName"),
                         "phoneNumber": new_session.phone_number,
                         "bureau_decision_details": new_session.data.get("bureau_decision_details"),
-                        "status": new_session.status
-                    },
-                    "created_at": new_session.created_at
-                }, status=status.HTTP_201_CREATED)
-                
+                        "status": new_session.status,
+                        "created_at": new_session.created_at
+                    })
+
+            except Exception as e:
+                logger.error(f"Database error in session details: {e}")
+                return Response({
+                    "status": "error",
+                    "message": "Internal server error while accessing session data",
+                    "error_details": str(e) if settings.DEBUG else None
+                }, status=500)
+
         except Exception as e:
-            logger.error(f"Error processing session details: {e}")
+            logger.error(f"Unexpected error in session details: {e}")
             return Response({
                 "status": "error",
-                "message": str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                "message": "An unexpected error occurred",
+                "error_details": str(e) if settings.DEBUG else None
+            }, status=500)
