@@ -291,7 +291,7 @@ class CarepayAgent:
             session = {
                 "id": session_id,
                 "created_at": datetime.now().isoformat(),
-                "status": "initial",  
+                "status": "active",  
                 "history": [],  
                 "data": {},  
                 "phone_number": phone_number
@@ -923,8 +923,8 @@ class CarepayAgent:
             loan_amount = data.get("treatmentCost")
             
             # Get doctor details from session if available
-            doctor_id = "e71779851b144d1d9a25a538a03612fc"
-            doctor_name = "Nikhil_Salkar"
+            doctor_id = None
+            doctor_name = None
             
             if hasattr(self, '_current_session_id'):
                 session = self.sessions.get(self._current_session_id)
@@ -1494,7 +1494,6 @@ class CarepayAgent:
                 defaults={
                     'application_id': session.get('application_id', uuid.uuid4()),
                     'phone_number': session.get('phone_number', None),
-                    'user_id': session.get('user_id', None),
                     'data': session.get('data', {}),
                     'history': session.get('history', []),
                     'status': session.get('status', 'initial')
@@ -1505,8 +1504,6 @@ class CarepayAgent:
                 # Update existing record
                 if 'phone_number' in session and session['phone_number']:
                     session_data_obj.phone_number = session['phone_number']
-                if 'user_id' in session and session['user_id']:
-                    session_data_obj.user_id = session['user_id']
                 if 'data' in session:
                     session_data_obj.data = session['data']
                 if 'history' in session:
