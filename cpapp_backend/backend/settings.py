@@ -37,7 +37,7 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-qa=jz*72l$4oz%e_%k$
 DEBUG = True
 
 # ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '34.131.33.60']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '34.131.33.60', 'loanbot.carepay.money']
 # ALLOWED_HOSTS_ENV = os.getenv('ALLOWED_HOSTS', '')
 # if ALLOWED_HOSTS_ENV:
 #     ALLOWED_HOSTS.extend([host.strip() for host in ALLOWED_HOSTS_ENV.split(',')])
@@ -177,6 +177,7 @@ CORS_ALLOWED_ORIGINS = [
     'http://34.131.46.229:5173',
     'http://34.131.33.60',  # Your production domain
     'https://34.131.33.60',  # If using HTTPS
+    'https://loanbot.carepay.money',
 ]
 
 CORS_ALLOW_METHODS = [
