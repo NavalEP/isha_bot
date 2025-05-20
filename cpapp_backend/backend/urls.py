@@ -20,10 +20,15 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.views.generic import TemplateView
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
+from django.views.static import serve
+import os
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/agent/', include('cpapp.urls')),
+    # Serve images directly from static directory
+    path('images/<path:path>', serve, {'document_root': os.path.join(settings.STATICFILES_DIRS[0], 'images')}),
+    path('favicon.svg', serve, {'document_root': settings.STATICFILES_DIRS[0], 'path': 'favicon.svg'}),
     # Catch all routes and serve React app
     re_path(r'^.*$', TemplateView.as_view(template_name='index.html'), name='home'),
 ]
