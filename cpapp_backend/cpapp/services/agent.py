@@ -267,6 +267,7 @@ class CarepayAgent:
             agent=agent,
             tools=tools,
             verbose=True,
+            max_iterations=30,
             handle_parsing_errors=True,
         )
 
