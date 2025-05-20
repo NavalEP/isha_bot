@@ -235,7 +235,7 @@ class CarepayAPIClient:
         endpoint = f"experianBureauReport"
         return self._make_request('GET', endpoint, params={"loanId": loan_id})
     
-    def get_bureau_decision(self, doctor_id: str, loan_id: str, regenerate_param: int = 0) -> Dict[str, Any]:
+    def get_bureau_decision(self, doctor_id: str, loan_id: str, regenerate_param: int = 1) -> Dict[str, Any]:
         """Get bureau-based decision"""
         endpoint = f"getBureauDecision"
         params = {
