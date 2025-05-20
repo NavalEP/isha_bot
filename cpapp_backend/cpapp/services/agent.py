@@ -926,12 +926,12 @@ class CarepayAgent:
             # Check if input_str is just a loan ID (not JSON)
             if input_str and input_str.strip() and not input_str.strip().startswith('{'):
                 loan_id = input_str.strip()
-                regenerate_param = 0
+                regenerate_param = 1
             else:
                 # Try to parse as JSON
                 data = json.loads(input_str)
                 loan_id = data.get("loan_id") or data.get("loanId")
-                regenerate_param = data.get("regenerate_param", 0) or data.get("regenerateParam", 0)
+                regenerate_param = data.get("regenerate_param", 1) or data.get("regenerateParam", 1)
             
             # If loan_id is not provided, try to get from session
             if not loan_id and hasattr(self, '_current_session_id'):
