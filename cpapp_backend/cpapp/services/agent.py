@@ -120,6 +120,8 @@ class CarepayAgent:
              ### Loan Application Decision:
              
              🎉 Congratulations, [PATIENT_NAME]! Your loan application has been **APPROVED**.
+             
+             Please complete your laon application by clicking on the following link:
              ```
            
            - For REJECTED status:
@@ -134,7 +136,8 @@ class CarepayAgent:
              ```
              ### Loan Application Decision:
              
-             Your application requires **INCOME VERIFICATION**. Please submit additional income documents to proceed.
+             Your application requires **INCOME VERIFICATION**. 
+             Please complete your laon application by clicking on the following link:
              ```
              
            - For any other status:
@@ -142,11 +145,13 @@ class CarepayAgent:
              ### Loan Application Decision:
              
              Your loan application status is: **[BUREAU_DECISION]**.
+             Please complete your laon application by clicking on the following link:
              ```
              
            - IMPORTANT: NEVER display "APPROVED" status for any application that has status INCOME_VERIFICATION_REQUIRED or any other status that is not explicitly "APPROVED".
            - IMPORTANT: Strictly use the exact status value received from the get_bureau_decision API response.
            - IMPORTANT: Keep your response simple and clean. Do NOT include any EMI plans, tenure details, or payment schedules in your response.
+           - IMPORTANT: For APPROVED, INCOME_VERIFICATION_REQUIRED, status, always include the profile completion link from the response data.
 
         Always maintain a professional, helpful tone throughout the conversation.
         """
@@ -964,6 +969,17 @@ class CarepayAgent:
             
             # Log the raw API response for debugging
             logger.info(f"Bureau decision API response for loan ID {loan_id}: {json.dumps(result)}")
+            
+            # Get profile completion link after bureau decision
+            profile_link_response = self.api_client.get_profile_completion_link(doctor_id)
+            logger.info(f"Profile completion link response: {json.dumps(profile_link_response)}")
+            
+            # If profile link was successfully retrieved, add it to the result
+            if isinstance(profile_link_response, dict) and profile_link_response.get("status") == 200:
+                if isinstance(result, dict) and result.get("status") == 200:
+                    if "data" not in result:
+                        result["data"] = {}
+                    result["data"]["profile_completion_link"] = profile_link_response.get("data")
             
             # Check if the response contains the special INCOME_VERIFICATION_REQUIRED status
             if (isinstance(result, dict) and result.get("status") == 200 and 
