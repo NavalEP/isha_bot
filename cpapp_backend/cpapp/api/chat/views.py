@@ -129,7 +129,7 @@ class SessionDetailsView(APIView):
         try:
             # Convert string UUID to UUID object
             try:
-                session_uuid = UUID(session_uuid)
+                session_uuid = UUID(str(session_uuid))  # Ensure we're working with a string first
             except (ValueError, TypeError):
                 return Response({
                     "status": "error",
@@ -138,46 +138,34 @@ class SessionDetailsView(APIView):
 
             try:
                 # Try to find existing active session
-                try:
                     session = SessionData.objects.get(
                         session_id=session_uuid,
                     )
                     
+                    # Convert history items to proper format if they exist
+                    history = []
+                    if session.history:
+                        for item in session.history:
+                            if isinstance(item, dict):
+                                history.append(item)
+                            else:
+                                # Convert any non-dict items to dict format
+                                history.append({
+                                    'type': 'AIMessage' if isinstance(item, str) else 'HumanMessage',
+                                    'content': str(item)
+                                })
+                    
                     # Return existing session data
                     return Response({
                         "status": "success",
-                        "session_id": str(session.session_id),
-                        "data": session.data,
-                        "fullName": session.data.get("fullName"),
+                        "session_id": str(session.session_id),  # Convert UUID to string
                         "phoneNumber": session.phone_number,
-                        "bureau_decision_details": session.data.get("bureau_decision_details"),
                         "status": session.status,
-                        "message": None,
                         "created_at": session.created_at,
-                        "updated_at": session.updated_at
+                        "updated_at": session.updated_at,
+                        "history": history
                     })
-
-                except SessionData.DoesNotExist:
-                    # Create new session since existing one not found
-                    new_session = SessionData.objects.create(
-                        phone_number=None,  # Will be set later
-                        session_id=session_uuid,
-                        data={},
-                        history=[],
-                        status="initial"
-                    )
                     
-                    return Response({
-                        "status": "success",
-                        "message": "New session created",
-                        "session_id": str(new_session.session_id),
-                        "data": new_session.data,
-                        "fullName": new_session.data.get("fullName"),
-                        "phoneNumber": new_session.phone_number,
-                        "bureau_decision_details": new_session.data.get("bureau_decision_details"),
-                        "status": new_session.status,
-                        "created_at": new_session.created_at
-                    })
 
             except Exception as e:
                 logger.error(f"Database error in session details: {e}")
