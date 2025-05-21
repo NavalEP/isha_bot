@@ -342,20 +342,20 @@ class CarepayAgent:
         """
         try:
             # Validate session_id
-            if session_id not in self.sessions:
-                # Try to load from database
-                try:
-                    session_data = SessionData.objects.get(session_id=session_id)
-                    if session_data:
-                        # Restore session from database
-                        self.sessions[session_id] = {
-                            "id": str(session_data.session_id),
-                            "data": session_data.data or {},
-                            "history": session_data.history or [],
-                            "status": session_data.status or "initial"
-                        }
-                except SessionData.DoesNotExist:
-                    return "Session expired or not found. Please refresh the page to start a new session."
+            # if session_id not in self.sessions:
+            #     # Try to load from database
+            #     try:
+            #         session_data = SessionData.objects.get(session_id=session_id)
+            #         if session_data:
+            #             # Restore session from database
+            #             self.sessions[session_id] = {
+            #                 "id": str(session_data.session_id),
+            #                 "data": session_data.data or {},
+            #                 "history": session_data.history or [],
+            #                 "status": session_data.status or "initial"
+            #             }
+            #     except SessionData.DoesNotExist:
+            #         return "Session expired or not found. Please refresh the page to start a new session."
             
             # Set current session for helper methods
             self._current_session_id = session_id
@@ -432,7 +432,7 @@ class CarepayAgent:
         
         except Exception as e:
             logger.error(f"Error processing message: {e}")
-            return "I apologize, but I encountered an error. Please start a new chat session to continue our conversation."
+            return "Please start a new chat session to continue our conversation."
 
     def get_session_data(self, session_id: str = None) -> str:
         """
