@@ -1367,6 +1367,20 @@ class CarepayAgent:
                 
             session = self.sessions[session_id]
             
+            # Convert history to serializable format before saving
+            serializable_history = []
+            if 'history' in session:
+                for msg in session['history']:
+                    if hasattr(msg, 'content'):  # Check if it's a Message object
+                        serializable_history.append({
+                            'type': msg.__class__.__name__,
+                            'content': msg.content
+                        })
+                    elif isinstance(msg, dict):
+                        serializable_history.append(msg)
+                    else:
+                        serializable_history.append(str(msg))
+            
             # Get or create SessionData object
             session_data_obj, created = SessionData.objects.get_or_create(
                 session_id=uuid.UUID(session_id),
@@ -1374,7 +1388,7 @@ class CarepayAgent:
                     'application_id': session.get('application_id', uuid.uuid4()),
                     'phone_number': session.get('phone_number', None),
                     'data': session.get('data', {}),
-                    'history': session.get('history', []),
+                    'history': serializable_history,
                     'status': session.get('status', 'active')
                 }
             )
@@ -1386,17 +1400,7 @@ class CarepayAgent:
                 if 'data' in session:
                     session_data_obj.data = session['data']
                 if 'history' in session:
-                    # Convert LangChain message objects to serializable format
-                    history = []
-                    for msg in session['history']:
-                        if isinstance(msg, (HumanMessage, AIMessage, SystemMessage)):
-                            history.append({
-                                'type': msg.__class__.__name__,
-                                'content': msg.content
-                            })
-                        else:
-                            history.append(msg)
-                    session_data_obj.history = history
+                    session_data_obj.history = serializable_history
                 if 'status' in session:
                     session_data_obj.status = session['status']
                 
@@ -1405,3 +1409,4 @@ class CarepayAgent:
             logger.info(f"Session {session_id} saved to database")
         except Exception as e:
             logger.error(f"Error saving session {session_id} to database: {e}")
+            raise
