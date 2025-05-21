@@ -317,3 +317,25 @@ class CarepayAPIClient:
                 logger.warning(f"Error enhancing bureau decision: {e}")
         
         return result
+
+    def get_profile_completion_link(self, doctor_id: str = None) -> Dict[str, Any]:
+        """
+        Get the profile completion link for a doctor
+        
+        Args:
+            doctor_id: Doctor's ID (optional - will use session doctor_id if not provided)
+            
+        Returns:
+            API response containing the profile completion link
+        """
+        # Use provided doctor_id or fall back to session doctor_id
+        doctor_id_to_use = doctor_id if doctor_id is not None else self.doctor_id
+        
+        if not doctor_id_to_use:
+            logger.warning("No doctor_id available for getting profile completion link")
+            return {"status": 400, "error": "Doctor ID is required"}
+            
+        endpoint = "getProfileCompletionLink"
+        logger.info(f"Getting profile completion link for doctor {doctor_id_to_use}")
+        
+        return self._make_request('GET', endpoint, params={"doctorId": doctor_id_to_use})
