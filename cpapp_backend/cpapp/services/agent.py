@@ -287,13 +287,23 @@ class CarepayAgent:
         try:
             # Generate a unique session ID
             session_id = str(uuid.uuid4())
+
+            # Create initial greeting message
+            initial_message = (
+                "Hello! I'm here to assist you with your patient's medical loan. "
+                "Let's get started. First, kindly provide me with the following details?\n"
+                "1. Patient's full name\n"
+                "2. Patient's phone number (linked to their PAN)\n" 
+                "3. The cost of the treatment\n"
+                "4. Monthly income of your patient."
+            )
             
             # Create session with initial data
             session = {
                 "id": session_id,
                 "created_at": datetime.now().isoformat(),
                 "status": "active",  
-                "history": [],  
+                "history": [AIMessage(content=initial_message)],  # Add initial message to history
                 "data": {},  
                 "phone_number": phone_number
             }
