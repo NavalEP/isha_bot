@@ -23,6 +23,7 @@ import jwt
 from django.conf import settings
 from cpapp.models.session_data import SessionData
 from uuid import UUID
+from django.core.exceptions import ObjectDoesNotExist
 
 logger = logging.getLogger(__name__)
 
@@ -138,34 +139,38 @@ class SessionDetailsView(APIView):
 
             try:
                 # Try to find existing active session
-                    session = SessionData.objects.get(
-                        session_id=session_uuid,
-                    )
-                    
-                    # Convert history items to proper format if they exist
-                    history = []
-                    if session.history:
-                        for item in session.history:
-                            if isinstance(item, dict):
-                                history.append(item)
-                            else:
-                                # Convert any non-dict items to dict format
-                                history.append({
-                                    'type': 'AIMessage' if isinstance(item, str) else 'HumanMessage',
-                                    'content': str(item)
-                                })
-                    
-                    # Return existing session data
-                    return Response({
-                        "status": "success",
-                        "session_id": str(session.session_id),  # Convert UUID to string
-                        "phoneNumber": session.phone_number,
-                        "status": session.status,
-                        "created_at": session.created_at,
-                        "updated_at": session.updated_at,
-                        "history": history
-                    })
-                    
+                session = SessionData.objects.get(
+                    session_id=session_uuid,
+                )
+                
+                # Convert history items to proper format if they exist
+                history = []
+                if session.history:
+                    for item in session.history:
+                        if isinstance(item, dict):
+                            history.append(item)
+                        else:
+                            # Convert any non-dict items to dict format
+                            history.append({
+                                'type': 'AIMessage' if isinstance(item, str) else 'HumanMessage',
+                                'content': str(item)
+                            })
+                
+                # Return existing session data
+                return Response({
+                    "status": "success",
+                    "session_id": str(session.session_id),  # Convert UUID to string
+                    "phoneNumber": session.phone_number,
+                    "status": session.status,
+                    "created_at": session.created_at,
+                    "updated_at": session.updated_at,
+                    "history": history
+                })
+
+            except ObjectDoesNotExist:
+                return Response({
+                    "message": "Session not found"
+                }, status=200)
 
             except Exception as e:
                 logger.error(f"Database error in session details: {e}")
