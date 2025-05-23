@@ -71,6 +71,8 @@ class CarepayAgent:
 
         4. Data Prefill:
            - didn't miss this step
+           - if get_prefill_data will show status other then 200 like 500 then  return continue you jounry with below provided link here call get_profile_link tool this take input session_id to get profile link and return that link 
+           --I encountered an issue while processing the loan. However, you can continue your journey given link here
            - Use get_prefill_data tool to retrieve user details using the userId and renmber this userID  that will use in process_prefill_data_for_basic_details
            - Extract from the response: PAN number, gender, DOB, email (if available)
            - didn't forget the userId what give to process_prefill_data_for_basic_details
@@ -116,6 +118,27 @@ class CarepayAgent:
            - Format your loan decision response based on the status received from get_bureau_decision:
            
            - For APPROVED status ONLY:
+             * First, check the loan amount from the initial data collection
+             * If loan amount is 100,000 or above, (check loanAmount in response of get_bureau_decision)
+             (use below format when loan amount is 100,000 or above)
+             ```
+             ### Loan Application Decision:
+             
+             🎉 Congratulations, [PATIENT_NAME]! Your loan application has been **APPROVED**.
+             
+             **Approval Details:**
+             - Credit Limit: ₹[CREDIT_LIMIT] (extracted from bureau decision response, there is grossTreatmentAmount in bureau decision response)
+             - Down Payment: ₹[DOWN_PAYMENT] (if available from emiPlans this is downPayment in bureau decision response)
+             
+             Would you like to proceed without down payment? If yes, income verification will be required.
+             
+             What is the Employment Type of the patient?   
+             1. SALARIED
+             2. SELF-EMPLOYED
+             Please Enter input 1 or 2 only
+             ```
+             
+             For loan amount is below ₹100,000:
              ```
              ### Loan Application Decision:
              
@@ -124,6 +147,8 @@ class CarepayAgent:
              What is the Employment Type of the patient?   
              1. SALARIED
              2. SELF-EMPLOYED
+             Please Enter input 1 or 2 only
+
              ```
            
            - For REJECTED status:
@@ -135,6 +160,7 @@ class CarepayAgent:
              ```
              
            - For INCOME_VERIFICATION_REQUIRED status:
+             
              ```
              ### Loan Application Decision:
              
@@ -143,6 +169,7 @@ class CarepayAgent:
              What is the Employment Type of the patient?    
              1. SALARIED
              2. SELF-EMPLOYED
+             Please Enter input 1 or 2 only
              ```
              
            - For any other status:
@@ -155,7 +182,10 @@ class CarepayAgent:
            
            - IMPORTANT: NEVER display "APPROVED" status for any application that has status INCOME_VERIFICATION_REQUIRED or any other status that is not explicitly "APPROVED".
            - IMPORTANT: Strictly use the exact status value received from the get_bureau_decision API response.
-           - IMPORTANT: Keep your response simple and clean. Do NOT include any EMI plans, tenure details, or payment schedules in your response.
+           - IMPORTANT: When bureau decision is approved and all eligible checks are false, still provide the approval information with credit limit and down payment details for loans >= ₹100,000.
+           - IMPORTANT: Extract credit limit from bureau decision response data (look for creditLimit, maxEligibleEMI, or similar fields).
+           - IMPORTANT: Extract down payment information from emiPlans in the bureau decision response if available.
+           - IMPORTANT: Only show detailed financial information (credit limit, down payment) for loan amounts of ₹100,000 or above.
            
        11. Additional Information Collection (For APPROVED or INCOME_VERIFICATION_REQUIRED status only):
            - After the user selects an Employment Type (1 or 2), collect the following information in sequence:
@@ -307,6 +337,12 @@ class CarepayAgent:
                 func=self.store_user_data,
                 
                 description="Store user data in session",
+            ),
+            Tool(
+                name="get_profile_link",
+                func=self._get_profile_link,
+                
+                description="Get profile link for a user",
             ),
         ]
 
@@ -1727,8 +1763,10 @@ class CarepayAgent:
             if collection_step == "employment_type":
                 if "1" in message:
                     additional_details["employment_type"] = "SALARIED"
+                    selected_option = "SALARIED"
                 elif "2" in message:
                     additional_details["employment_type"] = "SELF-EMPLOYED"
+                    selected_option = "SELF-EMPLOYED"
                 else:
                     return "Please select a valid option for Employment Type: 1. SALARIED or 2. SELF-EMPLOYED"
                 
@@ -1737,16 +1775,21 @@ class CarepayAgent:
                 
                 # Update collection step and ask for marital status
                 update_collection_step("marital_status")
-                return """What is the Marital Status of the patient?
+                return f"""You selected: {selected_option}
+
+What is the Marital Status of the patient?
 1. Married
-2. Unmarried/Single"""
+2. Unmarried/Single\n
+please type input 1 or 2 only"""
             
             # Handle marital status input
             elif collection_step == "marital_status":
                 if "1" in message:
                     additional_details["marital_status"] = "1"
+                    selected_option = "Married"
                 elif "2" in message:
                     additional_details["marital_status"] = "2"
+                    selected_option = "Unmarried/Single"
                 else:
                     return "Please select a valid option for Marital Status: 1. Married or 2. Unmarried/Single"
                 
@@ -1755,19 +1798,33 @@ class CarepayAgent:
                 
                 # Update collection step and ask for education qualification
                 update_collection_step("education_qualification")
-                return """What is the Education Qualification of the patient?
+                return f"""You selected: {selected_option}
+
+What is the Education Qualification of the patient?
 1. Less than 10th
 2. Passed 10th
 3. Passed 12th
 4. Diploma
 5. Graduation
 6. Post graduation
-7. P.H.D"""
+7. P.H.D\n
+please type input between 1 to 7 only"""
             
             # Handle education qualification input
             elif collection_step == "education_qualification":
-                if message.strip() in ["1", "2", "3", "4", "5", "6", "7"]:
+                education_options = {
+                    "1": "Less than 10th",
+                    "2": "Passed 10th", 
+                    "3": "Passed 12th",
+                    "4": "Diploma",
+                    "5": "Graduation",
+                    "6": "Post graduation",
+                    "7": "P.H.D"
+                }
+                
+                if message.strip() in education_options:
                     additional_details["education_qualification"] = message.strip()
+                    selected_option = education_options[message.strip()]
                 else:
                     return "Please select a valid option for Education Qualification (1-7)"
                 
@@ -1776,7 +1833,9 @@ class CarepayAgent:
                 
                 # Update collection step and ask for treatment reason
                 update_collection_step("treatment_reason")
-                return "What is the reason for treatment?"
+                return f"""You selected: {selected_option}
+
+What is the reason for treatment?"""
             
             # Handle treatment reason input
             elif collection_step == "treatment_reason":
@@ -1788,10 +1847,14 @@ class CarepayAgent:
                 # Update collection step and ask organization/business name based on employment type
                 if additional_details.get("employment_type") == "SALARIED":
                     update_collection_step("organization_name")
-                    return "What is the Organization Name where the patient works?"
+                    return f"""Treatment reason noted: {message.strip()}
+
+What is the Organization Name where the patient works?"""
                 else:
                     update_collection_step("business_name")
-                    return "What is the Business Name of the patient?"
+                    return f"""Treatment reason noted: {message.strip()}
+
+What is the Business Name of the patient?"""
             
             # Handle organization name input (for SALARIED)
             elif collection_step == "organization_name":
@@ -1802,7 +1865,9 @@ class CarepayAgent:
                 
                 # Update collection step to ask for workplace pincode
                 update_collection_step("workplace_pincode")
-                return "Please enter the workplace pincode (6 digits):"
+                return f"""Organization name noted: {message.strip()}
+
+Please enter the workplace pincode (6 digits):"""
             
             # Handle business name input (for SELF-EMPLOYED)
             elif collection_step == "business_name":
@@ -1813,7 +1878,9 @@ class CarepayAgent:
                 
                 # Update collection step to ask for workplace pincode
                 update_collection_step("workplace_pincode")
-                return "Please enter the workplace pincode (6 digits):"
+                return f"""Business name noted: {message.strip()}
+
+Please enter the workplace pincode (6 digits):"""
 
             # Handle workplace pincode input
             elif collection_step == "workplace_pincode":
@@ -1843,7 +1910,13 @@ class CarepayAgent:
                 profile_link = self._get_profile_link(session_id)
                 self.save_session_to_db(session_id)
                 
-                return f"Thank you! Your application is now complete. Please check your application status by visiting the following link:\n\n{profile_link}\n\nYou can track your application progress"
+                return f"""Workplace pincode noted: {pincode}
+
+Thank you! Your application is now complete. Please check your application status by visiting the following link:
+
+{profile_link}
+
+You can track your application progress and next step of process"""
             
             # If collection is complete, give a final message
             elif collection_step == "complete":
@@ -1866,12 +1939,8 @@ class CarepayAgent:
             
         Returns:
             Profile completion link URL
-        """
+        """  
         try:
-            if session_id not in self.sessions:
-                logger.error(f"Session {session_id} not found")
-                return "https://app.carepay.co.in"  # Fallback URL if session not found
-                
             session = self.sessions[session_id]
             
             # Get doctor ID from session
@@ -1898,11 +1967,11 @@ class CarepayAgent:
                  # Fallback URL
             else:
                 logger.error(f"Error getting profile link: {profile_link_response}")
-                return "https://app.carepay.co.in"  # Fallback URL if any error occurs
+                return "https://carepay.money/patient/Gurgaon/Nikhil_Dental_Clinic/Nikhil_Salkar/e71779851b144d1d9a25a538a03612fc/"  # Fallback URL if any error occurs
                 
         except Exception as e:
             logger.error(f"Error getting profile completion link: {e}")
-            return "https://app.carepay.co.in"  # Fallback URL if any error occurs
+            return "https://carepay.money/patient/Gurgaon/Nikhil_Dental_Clinic/Nikhil_Salkar/e71779851b144d1d9a25a538a03612fc/"  # Fallback URL if any error occurs
 
     def _process_employment_data_from_additional_details(self, session_id: str) -> Dict[str, Any]:
         """
