@@ -339,3 +339,27 @@ class CarepayAPIClient:
         logger.info(f"Getting profile completion link for doctor {doctor_id_to_use}")
         
         return self._make_request('GET', endpoint, params={"doctorId": doctor_id_to_use})
+    
+    def save_loan_details_again(self, user_id: str, loan_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Save loan details"""
+        endpoint = f"userDetails/saveLoanDetails"
+        
+        # Use provided doctor details if available, otherwise use instance variables
+        doctor_id_to_use = loan_data.get("doctorId")
+        doctor_name_to_use = loan_data.get("doctorName")
+        
+        # Log a warning if we're using default doctor details
+        if not self.has_doctor_details and doctor_id_to_use is None and doctor_name_to_use is None:
+            logger.warning("Using default doctor details. Call get_doctor_details first to use actual details.")
+            
+        data = {
+            "doctorId": doctor_id_to_use,
+            "doctorName": doctor_name_to_use,
+            "formStatus": "",
+            "loanAmount": loan_data.get("treatmentCost"),
+            "treatmentAmount": loan_data.get("treatmentCost"),
+            "loanReason": loan_data.get("loanReason"),
+            "Name": loan_data.get("fullName"),
+            "userId": user_id
+        }
+        return self._make_request('POST', endpoint, data=data)
