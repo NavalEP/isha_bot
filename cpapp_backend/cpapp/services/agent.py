@@ -42,6 +42,9 @@ class CarepayAgent:
         # Initialize API client
         self.api_client = CarepayAPIClient()
         
+        # Initialize agent executor as None - will be created on first use
+        self.agent_executor = None
+        
         # Define system prompt
         self.system_prompt = """
         You are a healthcare loan application assistant for CarePay. Your role is to help users apply for loans for medical treatments in a professional and friendly manner.
@@ -207,6 +210,10 @@ class CarepayAgent:
         Returns:
             Agent with tools
         """
+        # Return cached agent executor if it already exists
+        if self.agent_executor is not None:
+            return self.agent_executor
+            
         # Define tools
         tools = [
             Tool(
@@ -312,7 +319,7 @@ class CarepayAgent:
 
         # Create agent
         agent = create_openai_functions_agent(self.llm, tools, prompt)
-        agent_executor = AgentExecutor(
+        self.agent_executor = AgentExecutor(
             agent=agent,
             tools=tools,
             verbose=True,
@@ -320,7 +327,7 @@ class CarepayAgent:
             handle_parsing_errors=True,
         )
 
-        return agent_executor
+        return self.agent_executor
     
     def create_session(self, doctor_id=None, doctor_name=None, phone_number=None) -> str:
         """
@@ -428,7 +435,8 @@ class CarepayAgent:
                             "status": session_data.status or "active",
                             "phone_number": session_data.phone_number
                         }
-                        logger.info(f"Session {session_id} restored from database")
+                        logger.info(f"Session {session_id} restored from database with status: {session_data.status}")
+                        logger.info(f"Session data contains: {list(session_data.data.keys()) if session_data.data else 'No data'}")
                 except SessionData.DoesNotExist:
                     logger.warning(f"Session {session_id} not found in database")
                     # Still continue with an empty session to avoid breaking the flow
@@ -439,13 +447,32 @@ class CarepayAgent:
                         "status": "active",
                         "created_at": datetime.now().isoformat()
                     }
-            
+            else:
+                # Session is already in memory, but let's ensure we have the latest status from database if in additional details collection
+                # This prevents race conditions during concurrent requests
+                current_status = self.sessions[session_id].get("status", "active")
+                if current_status == "collecting_additional_details":
+                    try:
+                        session_data = SessionData.objects.get(session_id=session_id)
+                        if session_data and session_data.status == "collecting_additional_details":
+                            # Update session data from database to get latest collection_step
+                            if session_data.data:
+                                self.sessions[session_id]["data"].update(session_data.data)
+                            logger.info(f"Session {session_id} data refreshed from database during additional details collection")
+                    except SessionData.DoesNotExist:
+                        pass  # Continue with in-memory session
+                        
             # Set current session for helper methods
             self._current_session_id = session_id
             
             # Get session data
             session = self.sessions[session_id]
             current_status = session.get("status", "active")
+            
+            # Add debug logging to understand the session state
+            logger.info(f"Session {session_id} current status: {current_status}")
+            if "data" in session and "collection_step" in session["data"]:
+                logger.info(f"Session {session_id} collection step: {session['data']['collection_step']}")
             
             # We're no longer using the 'expired' status to prevent early session termination
             # Instead, we'll keep the session active regardless of status
@@ -476,6 +503,7 @@ class CarepayAgent:
             
             # Special handling for collecting additional details state
             if current_status == "collecting_additional_details":
+                logger.info(f"Session {session_id}: Entering additional details collection mode")
                 # Use direct sequential flow instead of full agent for efficiency
                 ai_message = self._handle_additional_details_collection(session_id, message)
                 chat_history.append(AIMessage(content=ai_message))
@@ -500,9 +528,11 @@ class CarepayAgent:
                 self.save_session_to_db(session_id)
                 return ai_message
             
+            logger.info(f"Session {session_id}: Using full agent executor (status: {current_status})")
             # Use LLM to generate response
-            agent_executor = self.setup_agent()
-            response = agent_executor.invoke({"input": message, "chat_history": chat_history})
+            if self.agent_executor is None:
+                self.agent_executor = self.setup_agent()
+            response = self.agent_executor.invoke({"input": message, "chat_history": chat_history})
             
             # Log all intermediate steps to ensure visibility of tool outputs
             if "intermediate_steps" in response:
@@ -1732,6 +1762,10 @@ class CarepayAgent:
             # Function to save the current collection step
             def update_collection_step(new_step):
                 session["data"]["collection_step"] = new_step
+                # Make sure to update the in-memory session immediately
+                self.sessions[session_id]["data"]["collection_step"] = new_step
+                # Also ensure the status is properly set
+                self.sessions[session_id]["status"] = "collecting_additional_details"
                 logger.info(f"Session {session_id}: Updated collection step to '{new_step}'")
                 self.save_session_to_db(session_id)
             
@@ -1748,6 +1782,8 @@ class CarepayAgent:
                 
                 # Update session data with employment type
                 session["data"]["additional_details"] = additional_details
+                # Also update in-memory session
+                self.sessions[session_id]["data"]["additional_details"] = additional_details
                 
                 # Update collection step and ask for marital status
                 update_collection_step("marital_status")
@@ -1771,6 +1807,8 @@ please Enter input 1 or 2 only"""
                 
                 # Update session data with marital status
                 session["data"]["additional_details"] = additional_details
+                # Also update in-memory session
+                self.sessions[session_id]["data"]["additional_details"] = additional_details
                 
                 # Update collection step and ask for education qualification
                 update_collection_step("education_qualification")
@@ -1806,6 +1844,8 @@ Please Enter input between 1 to 7 only"""
                 
                 # Update session data with education qualification
                 session["data"]["additional_details"] = additional_details
+                # Also update in-memory session
+                self.sessions[session_id]["data"]["additional_details"] = additional_details
                 
                 # Update collection step and ask for treatment reason
                 update_collection_step("treatment_reason")
@@ -1819,6 +1859,8 @@ What is the name of treatment?"""
                 
                 # Update session data with treatment reason
                 session["data"]["additional_details"] = additional_details
+                # Also update in-memory session
+                self.sessions[session_id]["data"]["additional_details"] = additional_details
                 
                 # Update collection step and ask organization/business name based on employment type
                 if additional_details.get("employment_type") == "SALARIED":
@@ -1838,6 +1880,8 @@ What is the Business Name of the patient?"""
                 
                 # Update session data
                 session["data"]["additional_details"] = additional_details
+                # Also update in-memory session
+                self.sessions[session_id]["data"]["additional_details"] = additional_details
                 
                 # Update collection step to ask for workplace pincode
                 update_collection_step("workplace_pincode")
@@ -1852,6 +1896,8 @@ Please enter 6 digits:"""
                 
                 # Update session data
                 session["data"]["additional_details"] = additional_details
+                # Also update in-memory session
+                self.sessions[session_id]["data"]["additional_details"] = additional_details
                 
                 # Update collection step to ask for workplace pincode
                 update_collection_step("workplace_pincode")
@@ -1871,6 +1917,8 @@ Please enter 6 digits:"""
                 
                 # Update session data
                 session["data"]["additional_details"] = additional_details
+                # Also update in-memory session
+                self.sessions[session_id]["data"]["additional_details"] = additional_details
                 
                 # Mark collection as complete
                 update_collection_step("complete")
