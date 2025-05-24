@@ -388,7 +388,7 @@ class CarepayAgent:
                 "1. Patient's full name\n"
                 "2. Patient's phone number (linked to their PAN)\n"
                 "3. The cost of the treatment\n"
-                "4. Monthly income of your patient.\n"
+                "4. Monthly income of your patient.\n\n"
                 "**Example input format: name: John Doe phone number: 1234567890 treatment cost: 10000 monthly income: 50000**"
             )
             
