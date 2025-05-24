@@ -52,9 +52,9 @@ class CarepayAgent:
            - Greet the user warmly and introduce yourself as CarePay's healthcare loan assistant
            - Collect and validate these four essential pieces of information:
               * Patient's full name
-              * Patient's phone number
-              * Treatment cost (between ₹30,000 to ₹20,00,000)
-              * Monthly income
+              * Patient's phone number(must be 10 digit number)
+              * Treatment cost (between ₹30,000 to ₹20,00,000)(must be positive number)
+              * Monthly income(must be positive number)
            - Use the store_user_data tool to save this information in the session
 
         2. User ID Creation:
@@ -71,12 +71,12 @@ class CarepayAgent:
 
         4. Data Prefill:
            - didn't miss this step
-           - if get_prefill_data will show status other then 200 like 500 then  return continue you jounry with below provided link here call get_profile_link tool this take input session_id to get profile link and return that link 
-           --I encountered an issue while processing the loan. However, you can continue your journey given link here
+           - if get_prefill_data will show status 200 then continue complete below steps
            - Use get_prefill_data tool to retrieve user details using the userId and renmber this userID  that will use in process_prefill_data_for_basic_details
            - Extract from the response: PAN number, gender, DOB, email (if available)
            - didn't forget the userId what give to process_prefill_data_for_basic_details
            - Use the process_prefill_data_for_basic_details tool to formate process_prefill_data for save_basic_details in process_prefill_data_for_basic_details there i calling save_basic_details with userId and prefill data as input  and also give userId in process_prefill_data_for_basic_details
+           - only if get_prefill_data will show status 500 then return continue you jounry with below provided link here call get_profile_link tool this take input session_id to get profile link and return that link I encountered an issue while processing the loan. However, you can continue your journey given link here
 
         5. Address Processing:
            - didn't miss this step
@@ -117,18 +117,18 @@ class CarepayAgent:
            - didn't miss this step
            - Format your loan decision response based on the status received from get_bureau_decision:
            
-           - For APPROVED status ONLY:
-             * First, check the loan amount from the initial data collection
-             * If loan amount is 100,000 or above, (check loanAmount in response of get_bureau_decision)
-             (use below format when loan amount is 100,000 or above)
+           - For APPROVED status:
+             * First, check the treatment cost from the initial store_user_data data collection
+             * only if treatment cost is 100,000 or above,
+             (only if treatment cost is 100,000 or above then use below format)
              ```
              ### Loan Application Decision:
              
              🎉 Congratulations, [PATIENT_NAME]! Your loan application has been **APPROVED**.
              
              **Approval Details:**
-             - Credit Limit: ₹[CREDIT_LIMIT] (extracted from bureau decision response, there is grossTreatmentAmount in bureau decision response)
-             - Down Payment: ₹[DOWN_PAYMENT] (if available from emiPlans this is downPayment in bureau decision response)
+             - Gross Treatment Amount: ₹[grossTreatmentAmount] (extracted from bureau decision response, there is grossTreatmentAmount in bureau decision response)
+             - DownPayment: ₹[downPayment] (if available from emiPlans this is downPayment in bureau decision response)
              
              Would you like to proceed without down payment? If yes, income verification will be required.
              
@@ -138,7 +138,7 @@ class CarepayAgent:
              Please Enter input 1 or 2 only
              ```
              
-             For loan amount is below ₹100,000:
+             other wise For treatment cost is below ₹100,000:
              ```
              ### Loan Application Decision:
              
@@ -1172,7 +1172,7 @@ class CarepayAgent:
                     loan_id = session["data"]["loanId"]
             
             # Get doctor_id from session if available, otherwise use default
-            doctor_id = "e71779851b144d1d9a25a538a03612fc"  # Default doctor ID as fallback
+            # doctor_id = "e71779851b144d1d9a25a538a03612fc"  # Default doctor ID as fallback
             if hasattr(self, '_current_session_id'):
                 session = self.sessions.get(self._current_session_id)
                 if session and "data" in session:
