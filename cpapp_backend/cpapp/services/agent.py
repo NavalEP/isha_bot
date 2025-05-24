@@ -355,24 +355,18 @@ class CarepayAgent:
                 "**Example input format: name: John Doe phone number: 1234567890 treatment cost: 10000 monthly income: 50000**"
             )
             
-            # Create session with initial data
+            # Create session with only serializable history
             session = {
                 "id": session_id,
                 "created_at": datetime.now().isoformat(),
                 "status": "active",  
-                "history": [AIMessage(content=initial_message)],  # Add initial message to history
+                "history": [{
+                    "type": "AIMessage",
+                    "content": initial_message
+                }],  # Single history system using serializable format
                 "data": {},  
                 "phone_number": phone_number
             }
-            
-            # Make sure to serialize the AIMessage when first storing the session
-            serializable_history = [{
-                "type": "AIMessage",
-                "content": initial_message
-            }]
-            
-            # Use serializable history for database storage
-            session["serializable_history"] = serializable_history
             
             # Store doctor information if provided
             if doctor_id:
@@ -413,25 +407,11 @@ class CarepayAgent:
                 try:
                     session_data = SessionData.objects.get(session_id=session_id)
                     if session_data:
-                        # Convert serialized history back to Message objects
-                        history = []
-                        if session_data.history:
-                            for msg in session_data.history:
-                                if isinstance(msg, dict) and 'type' in msg and 'content' in msg:
-                                    if msg['type'] == 'AIMessage':
-                                        history.append(AIMessage(content=msg['content']))
-                                    elif msg['type'] == 'HumanMessage':
-                                        history.append(HumanMessage(content=msg['content']))
-                                    else:
-                                        history.append(msg)  # Keep as is if not recognized
-                                else:
-                                    history.append(msg)  # Keep as is if not in expected format
-                        
-                        # Restore session from database
+                        # Restore session from database using only serializable history
                         self.sessions[session_id] = {
                             "id": str(session_data.session_id),
                             "data": session_data.data or {},
-                            "history": history,  # Use the converted history
+                            "history": session_data.history or [],  # Use serializable history directly
                             "status": session_data.status or "active",
                             "phone_number": session_data.phone_number
                         }
@@ -474,18 +454,12 @@ class CarepayAgent:
             if "data" in session and "collection_step" in session["data"]:
                 logger.info(f"Session {session_id} collection step: {session['data']['collection_step']}")
             
-            # We're no longer using the 'expired' status to prevent early session termination
-            # Instead, we'll keep the session active regardless of status
-            # This commented code is left for reference
-            # if current_status == "expired" and "decision_reviewed" in session.get("data", {}):
-            #     return "Session has expired after loan decision. Please start a new chat to continue."
-            
             phone = session.get("data", {}).get("phone", None)
             
             logger.info(f"Processing message in session {session_id} with status {current_status} and phone {phone}")
             
-            # Add user message to history
-            chat_history = session.get("history", [])
+            # Get current history in serializable format
+            history = session.get("history", [])
             
             # Check if this is an acknowledgment of bureau decision review
             if current_status == "bureau_decision_sent" and any(keyword in message.lower() for keyword in ["understood", "ok", "thank", "got it", "received"]):
@@ -499,36 +473,40 @@ class CarepayAgent:
                 self.save_session_to_db(session_id)
                 return "Thank you for confirming. Now I'll collect some additional information. What is the Employment Type of the patient?\n1. SALARIED\n2. SELF-EMPLOYED"
 
-            chat_history.append(HumanMessage(content=message))
+            # Add user message to history in serializable format
+            history.append({
+                "type": "HumanMessage",
+                "content": message
+            })
             
             # Special handling for collecting additional details state
             if current_status == "collecting_additional_details":
                 logger.info(f"Session {session_id}: Entering additional details collection mode")
                 # Use direct sequential flow instead of full agent for efficiency
                 ai_message = self._handle_additional_details_collection(session_id, message)
-                chat_history.append(AIMessage(content=ai_message))
-                session["history"] = chat_history
                 
-                # Update serializable_history for this special case too
-                if "serializable_history" not in session:
-                    session["serializable_history"] = []
-                
-                # Add the human message to serializable history
-                session["serializable_history"].append({
-                    "type": "HumanMessage",
-                    "content": message
-                })
-                
-                # Add the AI response to serializable history
-                session["serializable_history"].append({
+                # Add AI response to history in serializable format
+                history.append({
                     "type": "AIMessage",
                     "content": ai_message
                 })
                 
+                # Update session history
+                session["history"] = history
                 self.save_session_to_db(session_id)
                 return ai_message
             
             logger.info(f"Session {session_id}: Using full agent executor (status: {current_status})")
+            
+            # Convert serializable history to Message objects for LangChain agent
+            chat_history = []
+            for msg in history:
+                if isinstance(msg, dict) and 'type' in msg and 'content' in msg:
+                    if msg['type'] == 'AIMessage':
+                        chat_history.append(AIMessage(content=msg['content']))
+                    elif msg['type'] == 'HumanMessage':
+                        chat_history.append(HumanMessage(content=msg['content']))
+            
             # Use LLM to generate response
             if self.agent_executor is None:
                 self.agent_executor = self.setup_agent()
@@ -554,22 +532,9 @@ class CarepayAgent:
                         else:
                             logger.info(f"Tool Output: {output_str}")
             
-            # Extract LLM response and add to history
+            # Extract LLM response and add to history in serializable format
             ai_message = response.get("output", "I don't know how to respond to that.")
-            chat_history.append(AIMessage(content=ai_message))
-            
-            # Also update serializable_history
-            if "serializable_history" not in session:
-                session["serializable_history"] = []
-            
-            # Add the human message
-            session["serializable_history"].append({
-                "type": "HumanMessage",
-                "content": message
-            })
-            
-            # Add the AI response
-            session["serializable_history"].append({
+            history.append({
                 "type": "AIMessage",
                 "content": ai_message
             })
@@ -583,6 +548,8 @@ class CarepayAgent:
                 # We no longer need explicit acknowledgment since we're moving directly to additional data collection
                 # Add a simple prompt that prepares for continuing instead
                 ai_message += "\n\nPlease respond with 'OK' to continue with additional information collection."
+                # Update the last message in history with the modified content
+                history[-1]["content"] = ai_message
             
             # Check if this is the loan application decision with approval or income verification required
             if (("loan application has been **APPROVED**" in ai_message or 
@@ -597,7 +564,7 @@ class CarepayAgent:
                 logger.info(f"Session {session_id} marked as collecting_additional_details")
 
             # Save updated history to session
-            session["history"] = chat_history
+            session["history"] = history
             self.sessions[session_id] = session
             
             # Save updated session to database
@@ -633,24 +600,9 @@ class CarepayAgent:
             "status": session.get("status"),
             "created_at": session.get("created_at"),
             "data": session.get("data", {}),
-            "phone_number": session.get("phone_number")
+            "phone_number": session.get("phone_number"),
+            "history": session.get("history", [])  # Use the single history format directly
         }
-        
-        # Convert history to serializable format
-        serializable_history = []
-        if "history" in session:
-            for msg in session["history"]:
-                if hasattr(msg, "content"):  # Check if it's a Message object
-                    serializable_history.append({
-                        "type": msg.__class__.__name__,
-                        "content": msg.content
-                    })
-                elif isinstance(msg, dict):
-                    serializable_history.append(msg)
-                else:
-                    serializable_history.append(str(msg))
-        
-        serializable_session["history"] = serializable_history
         
         return json.dumps(serializable_session)
     
@@ -1596,33 +1548,15 @@ class CarepayAgent:
             if isinstance(session_id, str):
                 session_id = uuid.UUID(session_id)
             
-            # Use pre-serialized history if available, otherwise convert
-            if 'serializable_history' in session:
-                serializable_history = session['serializable_history']
-            else:
-                serializable_history = []
-                if 'history' in session:
-                    for msg in session['history']:
-                        if hasattr(msg, 'content'):  # Check if it's a Message object (AIMessage or HumanMessage)
-                            msg_type = msg.__class__.__name__
-                            serializable_history.append({
-                                'type': msg_type,
-                                'content': msg.content
-                            })
-                        elif isinstance(msg, dict):
-                            serializable_history.append(msg)
-                        else:
-                            serializable_history.append(str(msg))
-                            
-                # Store the serialized history for future use
-                session['serializable_history'] = serializable_history
+            # Use the single history format directly
+            history = session.get('history', [])
             
-            # Save to database as JSON-serializable format
+            # Save to database
             session_data, created = SessionData.objects.update_or_create(
                 session_id=session_id,
                 defaults={
                     'data': session.get('data', {}),
-                    'history': serializable_history,  # Use the serialized history
+                    'history': history,  # Use the single serializable history
                     'status': session.get('status', 'active'),
                     'phone_number': session.get('phone_number'),
                 }
@@ -1633,8 +1567,8 @@ class CarepayAgent:
             logger.error(f"Error saving session to database: {e}")
             # Log more detailed information for debugging
             if 'history' in session:
-                history_types = [type(msg).__name__ for msg in session['history']]
-                logger.error(f"History contains types: {history_types}")
+                history_info = f"History has {len(session['history'])} items"
+                logger.error(f"Session history info: {history_info}")
 
     def save_additional_user_details(self, input_str: str) -> str:
         """
