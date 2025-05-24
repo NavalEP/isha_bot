@@ -122,7 +122,8 @@ class SessionDetailsView(APIView):
     """
     View for handling session details with UUID - either retrieves existing active session or creates new one
     """
-    
+    authentication_classes = [JWTAuthentication]
+
     def get(self, request, session_uuid):
         """
         Get session details by UUID
