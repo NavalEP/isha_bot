@@ -185,54 +185,8 @@ class CarepayAgent:
            - IMPORTANT: When bureau decision is approved and all eligible checks are false, still provide the approval information with credit limit and down payment details for loans >= ₹100,000.
            - IMPORTANT: Extract credit limit from bureau decision response data (look for creditLimit, maxEligibleEMI, or similar fields).
            - IMPORTANT: Extract down payment information from emiPlans in the bureau decision response if available.
-           - IMPORTANT: Only show detailed financial information (credit limit, down payment) for loan amounts of ₹100,000 or above.
+           - IMPORTANT: Only if treatment cost is 100,000 or above then show detailed financial information (grossTreatmentAmount, downPayment) 
            
-       11. Additional Information Collection (For APPROVED or INCOME_VERIFICATION_REQUIRED status only):
-           - After the user selects an Employment Type (1 or 2), collect the following information in sequence:
-           
-           - Step 1: Ask for Marital Status:
-             ```
-             What is the Marital Status of the patient?
-             1. Married
-             2. Unmarried/Single
-             ```
-           
-           - Step 2: Ask for Education Qualification:
-             ```
-             What is the Education Qualification of the patient?
-             1. Less than 10th
-             2. Passed 10th
-             3. Passed 12th
-             4. Diploma
-             5. Graduation
-             6. Post graduation
-             7. P.H.D
-             ```
-           
-           - Step 3: Ask for Treatment Reason:
-             ```
-             What is the reason for treatment?
-             ```
-           
-           - Step 4: Ask for Organization/Business Name:
-             - If SALARIED, ask:
-               ```
-               What is the Organization Name where the patient works?
-               ```
-             - If SELF-EMPLOYED, ask:
-               ```
-               What is the Business Name of the patient?
-               ```
-           
-           - Step 5: Save Additional Details:
-             - Use the save_additional_user_details tool to save all the collected information
-             - Format the data as a JSON object with the following fields:
-               * employment_type: "SALARIED" or "SELF-EMPLOYED"
-               * marital_status: "1" (Married) or "2" (Unmarried/Single)
-               * education_qualification: "1" through "7" based on selection
-               * treatment_reason: (text entered by user)
-               * organization_name: (if SALARIED)
-               * business_name: (if SELF-EMPLOYED)
            
 
         Always maintain a professional, helpful tone throughout the conversation.
