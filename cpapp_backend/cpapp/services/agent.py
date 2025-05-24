@@ -1726,9 +1726,13 @@ class CarepayAgent:
             # This is stored in session data to remember where we are in the collection flow
             collection_step = session["data"].get("collection_step", "employment_type")
             
+            # Log current step for debugging
+            logger.info(f"Session {session_id}: Processing step '{collection_step}' with message: {message.strip()}")
+            
             # Function to save the current collection step
             def update_collection_step(new_step):
                 session["data"]["collection_step"] = new_step
+                logger.info(f"Session {session_id}: Updated collection step to '{new_step}'")
                 self.save_session_to_db(session_id)
             
             # Handle employment type input (first step)
@@ -1839,7 +1843,8 @@ What is the Business Name of the patient?"""
                 update_collection_step("workplace_pincode")
                 return f"""Organization name noted: {message.strip()}
 
-Please enter the workplace pincode (6 digits):"""
+What is the workplace/office pincode? (This is different from your home address pincode - we need the pincode where you work)
+Please enter 6 digits:"""
             
             # Handle business name input (for SELF-EMPLOYED)
             elif collection_step == "business_name":
@@ -1852,14 +1857,15 @@ Please enter the workplace pincode (6 digits):"""
                 update_collection_step("workplace_pincode")
                 return f"""Business name noted: {message.strip()}
 
-Please enter the workplace pincode (6 digits):"""
+What is your business location pincode? (This is different from your home address pincode - we need the pincode where your business is located)
+Please enter 6 digits:"""
 
             # Handle workplace pincode input
             elif collection_step == "workplace_pincode":
                 # Validate pincode (6 digit number)
                 pincode = message.strip()
                 if not pincode.isdigit() or len(pincode) != 6:
-                    return "Please enter a valid 6-digit pincode."
+                    return "Please enter a valid 6-digit workplace pincode (numbers only)."
                 
                 additional_details["workplacePincode"] = pincode
                 
