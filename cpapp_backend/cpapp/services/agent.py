@@ -1689,15 +1689,15 @@ class CarepayAgent:
             user_id = self.sessions[session_id]["data"].get("userId")
             # doctor_id = self.sessions[session_id]["data"].get("doctorId")
             # doctor_name = self.sessions[session_id]["data"].get("doctorName")
-            print(f"User ID: {user_id}")
+            # print(f"User ID: {user_id}")
             
             # If we have a user ID, send employment details to API
             if user_id:
                 employment_data = self._process_employment_data_from_additional_details(session_id)
                 if employment_data:
                     try:
-                        result = self.api_client.save_employment_details(user_id, employment_data)
-                        print(f"Successfully saved employment details for user {user_id}: {result}")
+                        self.api_client.save_employment_details(user_id, employment_data)
+                        # print(f"Successfully saved employment details for user {user_id}: {result}")
                         logger.info(f"Successfully saved employment details for user {user_id}: {employment_data}")
                     except Exception as e:
                         logger.error(f"Error saving employment details for user {user_id}: {e}")
@@ -1707,9 +1707,9 @@ class CarepayAgent:
                 if loan_data:
                     try:
                         # Convert loan_data to JSON string for save_loan_details
-                        result = self.api_client.save_loan_details_again(user_id, loan_data)
-                        print(f"Successfully saved loan details for user {user_id}: {result}")
-                        logger.info(f"Successfully saved loan details for user {user_id}: {result}")
+                        self.api_client.save_loan_details_again(user_id, loan_data)
+                        # print(f"Successfully saved loan details for user {user_id}: {result}")
+                        logger.info(f"Successfully saved loan details for user {user_id}")
 
                         # logger.info(f"Successfully saved loan details for user {user_id}: {loan_data}")
                     except Exception as e:
@@ -1719,8 +1719,8 @@ class CarepayAgent:
                 data = self._process_basic_details_from_additional_details(session_id)
                 if data:
                     try:
-                        result = self.api_client.save_basic_details(user_id, data)
-                        print(f"Successfully saved basic details for user {user_id}: {result}")
+                        self.api_client.save_basic_details(user_id, data)
+                        # print(f"Successfully saved basic details for user {user_id}: {result}")
                         logger.info(f"Successfully saved basic details for user {user_id}: {data}")
                     except Exception as e:
                         logger.error(f"Error saving basic details for user {user_id}: {e}")
@@ -1780,7 +1780,7 @@ class CarepayAgent:
 What is the Marital Status of the patient?
 1. Married
 2. Unmarried/Single\n
-please type input 1 or 2 only"""
+please Enter input 1 or 2 only"""
             
             # Handle marital status input
             elif collection_step == "marital_status":
@@ -1808,7 +1808,7 @@ What is the Education Qualification of the patient?
 5. Graduation
 6. Post graduation
 7. P.H.D\n
-please type input between 1 to 7 only"""
+Please Enter input between 1 to 7 only"""
             
             # Handle education qualification input
             elif collection_step == "education_qualification":
@@ -1835,7 +1835,7 @@ please type input between 1 to 7 only"""
                 update_collection_step("treatment_reason")
                 return f"""You selected: {selected_option}
 
-What is the reason for treatment?"""
+What is the name of treatment?"""
             
             # Handle treatment reason input
             elif collection_step == "treatment_reason":
