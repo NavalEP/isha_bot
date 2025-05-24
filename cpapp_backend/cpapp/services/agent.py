@@ -52,14 +52,16 @@ class CarepayAgent:
            - Greet the user warmly and introduce yourself as CarePay's healthcare loan assistant
            - Collect and validate these four essential pieces of information:
               * Patient's full name
-              * Patient's phone number(must be 10 digit number)
-              * Treatment cost (between ₹30,000 to ₹20,00,000)(must be positive number)
-              * Monthly income(must be positive number)
+              * Patient's phone number(must be 10 digit number if not find 10 digit number then return error message and ask to enter valid phone number)
+              * Treatment cost (between ₹30,000 to ₹20,00,000)(must be positive number other wise return error message and ask to enter valid treatment cost)
+              * Monthly income(must be positive number other wise return error message and ask to enter valid monthly income)
+              if these four details not collect from user message then ask ther remaining ones
            - Use the store_user_data tool to save this information in the session
 
         2. User ID Creation:
            - didn't miss this step
            - Use get_user_id_from_phone_number tool to get userId from the phone number
+           - if get_user_id_from_phone_number will show status 500 then return message like ask to enter valid phone number
            - Extract the userId from the response and store it in the session
            - Use this userId for all subsequent API calls
 
@@ -76,7 +78,7 @@ class CarepayAgent:
            - Extract from the response: PAN number, gender, DOB, email (if available)
            - didn't forget the userId what give to process_prefill_data_for_basic_details
            - Use the process_prefill_data_for_basic_details tool to formate process_prefill_data for save_basic_details in process_prefill_data_for_basic_details there i calling save_basic_details with userId and prefill data as input  and also give userId in process_prefill_data_for_basic_details
-           - only if get_prefill_data will show status 500 then return continue you jounry with below provided link here call get_profile_link tool this take input session_id to get profile link and return that link I encountered an issue while processing the loan. However, you can continue your journey given link here
+           - only if get_prefill_data will show status 500 then return continue you jounry with below provided link here  call get_profile_link tool this take input session_id to get profile link and return that link I encountered an issue while processing the loan. However, you can continue your journey given link here
 
         5. Address Processing:
            - didn't miss this step
@@ -641,6 +643,15 @@ class CarepayAgent:
             if not session_id or session_id not in self.sessions:
                 return "Session ID not found or invalid"
             
+            # Normalize field names for consistency
+            # Convert "phone" to "phoneNumber" for consistency
+            if "phone" in data and "phoneNumber" not in data:
+                data["phoneNumber"] = data.pop("phone")
+            
+            # Convert "name" to "fullName" for consistency 
+            if "name" in data and "fullName" not in data:
+                data["fullName"] = data.pop("name")
+            
             # Check if user_id is present in the data
             if 'user_id' in data or 'userId' in data:
                 user_id = data.get('user_id') or data.get('userId')
@@ -880,11 +891,18 @@ class CarepayAgent:
                 data = json.loads(input_str)
                 user_id = data.pop("userId", None) or data.pop("user_id", None)
                 
-                # Extract fullName and phoneNumber from input
+                # Extract fullName/name and phoneNumber/phone from input
                 if "fullName" in data:
                     data["firstName"] = data.pop("fullName")
+                elif "name" in data:
+                    data["firstName"] = data.pop("name")
+
                 if "phoneNumber" in data:
                     data["mobileNumber"] = data.pop("phoneNumber")
+                elif "phone" in data:
+                    data["mobileNumber"] = data.pop("phone")
+                else:
+                    return "Phone number is required"
 
             
             # Ensure we have a valid user ID
@@ -2054,6 +2072,8 @@ You can track your application progress and next step of process"""
             
             if "phoneNumber" in session["data"]:
                 basic_details["mobileNumber"] = session["data"]["phoneNumber"]
+            elif "phone" in session["data"]:
+                basic_details["mobileNumber"] = session["data"]["phone"]
             
             # Map marital status: 1 -> Yes, 2 -> No
             if "marital_status" in additional_details:
