@@ -1157,10 +1157,14 @@ class CarepayAgent:
             Bureau decision as JSON string
         """
         try:
+            # Initialize variables first
+            doctor_id = None
+            loan_id = None
+            regenerate_param = 1
+
             # Check if input_str is just a loan ID (not JSON)
             if input_str and input_str.strip() and not input_str.strip().startswith('{'):
                 loan_id = input_str.strip()
-                regenerate_param = 1
             else:
                 # Try to parse as JSON
                 data = json.loads(input_str)
@@ -1173,22 +1177,30 @@ class CarepayAgent:
                 if session and "data" in session and "loanId" in session["data"]:
                     loan_id = session["data"]["loanId"]
             
-            # Get doctor_id from session if available, otherwise use default
-            # doctor_id = "e71779851b144d1d9a25a538a03612fc"  # Default doctor ID as fallback
+            # Get doctor_id from session if available
             if hasattr(self, '_current_session_id'):
                 session = self.sessions.get(self._current_session_id)
                 if session and "data" in session:
-                    doctor_id = session["data"].get("doctor_id") or session["data"].get("doctorId", doctor_id)
-                    logger.info(f"Using doctor_id {doctor_id} from session for bureau decision")
-            
+                    doctor_id = session["data"].get("doctor_id")
+                    if doctor_id is None:
+                        doctor_id = session["data"].get("doctorId")
+                    if doctor_id:
+                        logger.info(f"Using doctor_id {doctor_id} from session for bureau decision")
+
+            # Validate required parameters
             if not loan_id:
-                return "Loan ID is required"
+                logger.error("Loan ID is missing for bureau decision")
+                return json.dumps({"status": 400, "error": "Loan ID is required"})
+
+            if not doctor_id:
+                logger.error("Doctor ID is missing for bureau decision")
+                return json.dumps({"status": 400, "error": "Doctor ID is required"})
                 
+            # Make the API call
             result = self.api_client.get_bureau_decision(doctor_id, loan_id, regenerate_param)
             
             # Log the raw API response for debugging
             logger.info(f"Bureau decision API response for loan ID {loan_id}: {json.dumps(result)}")
-            
             
             # Check if the response contains the special INCOME_VERIFICATION_REQUIRED status
             if (isinstance(result, dict) and result.get("status") == 200 and 
@@ -1216,7 +1228,10 @@ class CarepayAgent:
             return json.dumps(result)
         except Exception as e:
             logger.error(f"Error getting bureau decision: {e}")
-            return f"Error getting bureau decision: {str(e)}"
+            return json.dumps({
+                "status": 500,
+                "error": f"Error getting bureau decision: {str(e)}"
+            })
 
     def extract_bureau_decision_details(self, bureau_result: Dict[str, Any]) -> Dict[str, Any]:
         """
