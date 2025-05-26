@@ -19,6 +19,7 @@ from langchain_core.tools import ArgsSchema
 from cpapp.services.api_client import CarepayAPIClient
 from cpapp.models.session_data import SessionData
 from setup_env import setup_environment
+from cpapp.services.helper import Helper
 
 
 setup_environment()
@@ -2000,7 +2001,10 @@ You can track your application progress and next step of process"""
             if isinstance(profile_link_response, dict) and profile_link_response.get("status") == 200:
                 profile_link = profile_link_response.get("data", "")
                 
-                # Store the link in session for future reference
+                # Clean the profile link to remove invisible Unicode characters
+                profile_link = Helper.clean_url(profile_link)
+                
+                # Store the cleaned link in session for future reference
                 session["data"]["profile_completion_link"] = profile_link
                 
                
@@ -2008,11 +2012,13 @@ You can track your application progress and next step of process"""
                  # Fallback URL
             else:
                 logger.error(f"Error getting profile link: {profile_link_response}")
-                return "https://carepay.money/patient/Gurgaon/Nikhil_Dental_Clinic/Nikhil_Salkar/e71779851b144d1d9a25a538a03612fc/"  # Fallback URL if any error occurs
+                fallback_url = "https://carepay.money/patient/Gurgaon/Nikhil_Dental_Clinic/Nikhil_Salkar/e71779851b144d1d9a25a538a03612fc/"
+                return Helper.clean_url(fallback_url)  # Clean fallback URL as well
                 
         except Exception as e:
             logger.error(f"Error getting profile completion link: {e}")
-            return "https://carepay.money/patient/Gurgaon/Nikhil_Dental_Clinic/Nikhil_Salkar/e71779851b144d1d9a25a538a03612fc/"  # Fallback URL if any error occurs
+            fallback_url = "https://carepay.money/patient/Gurgaon/Nikhil_Dental_Clinic/Nikhil_Salkar/e71779851b144d1d9a25a538a03612fc/"
+            return Helper.clean_url(fallback_url)  # Clean fallback URL as well
 
     def _process_employment_data_from_additional_details(self, session_id: str) -> Dict[str, Any]:
         """
