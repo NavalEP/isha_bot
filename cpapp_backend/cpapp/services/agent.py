@@ -124,16 +124,15 @@ class CarepayAgent:
            - Format your loan decision response based on the status received from get_bureau_decision:
            
            - For APPROVED status:
-             * First, check the treatment cost from the initial store_user_data data collection
-             * only if treatment cost is 100,000 or above,
-             (only if treatment cost is 100,000 or above then use below format)
+             * Use the show_detailed_approval flag from the bureau decision response to determine format
+             * If show_detailed_approval is true (treatment cost ≥ ₹100,000):
              ```
              ### Loan Application Decision:
              
              🎉 Congratulations, [PATIENT_NAME]! Your loan application has been **APPROVED**.
              
              **Approval Details:**
-             - Gross Treatment Amount: ₹[grossTreatmentAmount] (extracted from bureau decision response, there is grossTreatmentAmount in bureau decision response)
+             - Gross Treatment Amount: ₹[grossTreatmentAmount] (extracted from bureau decision response, there is grossTreatAmount in bureau decision response)
              - DownPayment: ₹[downPayment] (if available from emiPlans this is downPayment in bureau decision response)
              
              Would you like to proceed without down payment? If yes, income verification will be required.
@@ -144,7 +143,7 @@ class CarepayAgent:
              Please Enter input 1 or 2 only
              ```
              
-             other wise For treatment cost is below ₹100,000:
+             * If show_detailed_approval is false (treatment cost < ₹100,000):
              ```
              ### Loan Application Decision:
              
@@ -154,7 +153,6 @@ class CarepayAgent:
              1. SALARIED
              2. SELF-EMPLOYED
              Please Enter input 1 or 2 only
-
              ```
            
            - For REJECTED status:
@@ -191,9 +189,7 @@ class CarepayAgent:
            - IMPORTANT: When bureau decision is approved and all eligible checks are false, still provide the approval information with credit limit and down payment details for loans >= ₹100,000.
            - IMPORTANT: Extract credit limit from bureau decision response data (look for creditLimit, maxEligibleEMI, or similar fields).
            - IMPORTANT: Extract down payment information from emiPlans in the bureau decision response if available.
-           - IMPORTANT: Only if treatment cost is 100,000 or above then show detailed financial information (grossTreatmentAmount, downPayment) 
-           
-           
+           - IMPORTANT: Use show_detailed_approval flag from bureau decision response to determine whether to show detailed financial information
 
         Always maintain a professional, helpful tone throughout the conversation.
         """
@@ -1203,12 +1199,42 @@ class CarepayAgent:
             # Log the raw API response for debugging
             logger.info(f"Bureau decision API response for loan ID {loan_id}: {json.dumps(result)}")
             
+            # Check treatment cost from session data and modify response accordingly
+            treatment_cost = None
+            show_detailed_approval = False
+            
+            if hasattr(self, '_current_session_id'):
+                session = self.sessions.get(self._current_session_id)
+                if session and "data" in session:
+                    # Check for treatment cost in different possible field names
+                    session_data = session["data"]
+                    treatment_cost = (session_data.get("treatmentCost") or 
+                                    session_data.get("treatment_cost") or 
+                                    session_data.get("loanAmount"))
+                    
+                    if treatment_cost:
+                        try:
+                            # Convert to float for comparison
+                            cost_value = float(str(treatment_cost).replace(',', '').replace('₹', ''))
+                            show_detailed_approval = cost_value >= 100000
+                            logger.info(f"Treatment cost: ₹{cost_value}, Show detailed approval: {show_detailed_approval}")
+                        except (ValueError, TypeError):
+                            logger.warning(f"Could not parse treatment cost: {treatment_cost}")
+                            show_detailed_approval = False
+            
             # Check if the response contains the special INCOME_VERIFICATION_REQUIRED status
             if (isinstance(result, dict) and result.get("status") == 200 and 
                 isinstance(result.get("data"), dict)):
                 
                 data = result.get("data", {})
                 status = data.get("status") or data.get("bureauDecision")
+                
+                # Add treatment cost logic to the response data
+                if status and status.upper() == "APPROVED":
+                    # Add metadata to help the system prompt determine response format
+                    data["show_detailed_approval"] = show_detailed_approval
+                    data["treatment_cost"] = treatment_cost
+                    logger.info(f"APPROVED status detected. Show detailed approval: {show_detailed_approval}")
                 
                 if status and "INCOME" in status.upper() and "VERIFICATION" in status.upper():
                     logger.info(f"INCOME VERIFICATION status detected in bureau decision: {status}")
@@ -1221,6 +1247,8 @@ class CarepayAgent:
                     session_id = self._current_session_id
                     if session_id in self.sessions:
                         self.sessions[session_id]["data"]["bureau_decision_details"] = bureau_result
+                        # Also store the treatment cost logic result
+                        self.sessions[session_id]["data"]["show_detailed_approval"] = show_detailed_approval
                         logger.info(f"Stored bureau decision details in session: {bureau_result}")
                         
                         # Save updated session to database
