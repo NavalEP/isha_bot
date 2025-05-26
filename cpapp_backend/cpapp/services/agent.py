@@ -90,6 +90,7 @@ class CarepayAgent:
            - Pass the userId to the tool to ensure it can retrieve the prefill data and extract the address information
            - This tool will extract the address line, pincode (postal code), and state from the primary/permanent address in the prefill data
            - The tool will automatically call save_address_details with the extracted information
+           - Use pan_verification tool using userId to verify pan number here just check the response status if 200 continue the remain steps
 
         6. Employment Verification:
            - didn't miss this step
@@ -248,6 +249,12 @@ class CarepayAgent:
                 func=self.save_address_details,
                
                 description="Save address details for a user. Requires userId and address object.",
+            ),
+            Tool(
+                name="pan_verification",
+                func=self.pan_verification,
+                
+                description="Verify PAN details for a user",
             ),
             Tool(
                 name="get_employment_verification",
@@ -1620,6 +1627,58 @@ class CarepayAgent:
             return json.dumps({
                 "error": f"Error processing address data: {str(e)}",
                 "userId": user_id if 'user_id' in locals() else None
+            })
+        
+    def pan_verification(self, input_str: str) -> str:
+        """
+        Verify PAN details for a user
+        
+        Args:
+            input_str: JSON string with userId or just userId string
+        
+        Returns:
+            Verification result as JSON string
+        """
+        try:
+            # Handle both JSON input and plain userId string
+            if input_str and input_str.strip() and not input_str.strip().startswith('{'):
+                # Input is just a userId string
+                user_id = input_str.strip()
+            else:
+                # Try to parse as JSON
+                try:
+                    data = json.loads(input_str)
+                    user_id = data.get('userId')
+                except json.JSONDecodeError:
+                    return json.dumps({"status": 400, "error": "Invalid input format. Expected userId or JSON with userId field."})
+            
+            if not user_id:
+                # Try to get user ID from session if not provided in input
+                if hasattr(self, '_current_session_id'):
+                    session = self.sessions.get(self._current_session_id)
+                    if session and session.get("user_id"):
+                        user_id = session.get("user_id")
+                    elif session and session.get("data", {}).get("userId"):
+                        user_id = session["data"]["userId"]
+                
+                if not user_id:
+                    return json.dumps({"status": 400, "error": "User ID is required for PAN verification"})
+            
+            logger.info(f"Performing PAN verification for user ID: {user_id}")
+            result = self.api_client.pan_verification(user_id)
+            
+            # Ensure result is JSON serializable
+            if isinstance(result, dict):
+                return json.dumps(result)
+            else:
+                # If result is not a dict, wrap it in a response structure
+                return json.dumps({"status": 200, "data": result})
+                
+        except Exception as e:
+            logger.error(f"Error verifying PAN: {e}")
+            return json.dumps({
+                "status": 500,
+                "error": f"Error verifying PAN: {str(e)}"
             })
 
     def save_session_to_db(self, session_id: str) -> None:

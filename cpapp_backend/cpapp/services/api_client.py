@@ -363,3 +363,16 @@ class CarepayAPIClient:
             "userId": user_id
         }
         return self._make_request('POST', endpoint, data=data)
+    
+    def pan_verification(self, user_id: str) -> Dict[str, Any]:
+        """
+        Verify PAN details for a user
+        
+        Args:
+            user_id: User ID to verify PAN for
+            
+        Returns:
+            API response
+        """
+        endpoint = "panVerify"
+        return self._make_request('GET', endpoint, params={"userId": user_id})
