@@ -25,6 +25,12 @@ from cpapp.services.helper import Helper
 setup_environment()
 
 logger = logging.getLogger(__name__)
+logger.addHandler(logging.StreamHandler())
+logger.setLevel(logging.DEBUG)
+
+logger_session = logging.getLogger('session_management')
+logger_session.addHandler(logging.StreamHandler())
+logger_session.setLevel(logging.DEBUG)
 
 class CarepayAgent:
     """
@@ -221,14 +227,9 @@ class CarepayAgent:
             Session data dictionary or None if not found
         """
         try:
-            # Convert session_id to UUID if it's a string
-            if isinstance(session_id, str):
-                session_uuid = uuid.UUID(session_id)
-            else:
-                session_uuid = session_id
-            
-            # Get session from database
+            session_uuid = uuid.UUID(session_id)
             session_data = SessionData.objects.get(session_id=session_uuid)
+            logger.debug(f"Session {session_id} retrieved from database.")
             if not session_data:
                 logger.warning(f"Session {session_id} not found in database")
                 return None
@@ -260,6 +261,9 @@ class CarepayAgent:
             }
             
             return session
+        except SessionData.DoesNotExist:
+            logger.warning(f"Session {session_id} not found in database.")
+            return None
         except Exception as e:
             logger.error(f"Error retrieving session from database: {e}")
             return None
@@ -448,14 +452,16 @@ class CarepayAgent:
             
             # Check if this is an acknowledgment of bureau decision review
             if current_status == "bureau_decision_sent" and any(keyword in message.lower() for keyword in ["understood", "ok", "thank", "got it", "received"]):
-                session["data"]["decision_reviewed"] = True
-                # Instead of expiring the session, mark it for additional data collection
-                session["status"] = "collecting_additional_details"
-                # Initialize the additional_details dictionary and collection_step
-                if "additional_details" not in session["data"]:
-                    session["data"]["additional_details"] = {}
-                session["data"]["collection_step"] = "employment_type"
-                self.update_session_in_db(session_id, session)
+                # Use targeted updates to preserve existing audit trail data
+                self.update_session_data_field(session_id, "data.decision_reviewed", True)
+                self.update_session_data_field(session_id, "status", "collecting_additional_details")
+                self.update_session_data_field(session_id, "data.collection_step", "employment_type")
+                
+                # Initialize additional_details if it doesn't exist
+                current_session = self.get_session_from_db(session_id)
+                if current_session and current_session.get("data", {}).get("additional_details") is None:
+                    self.update_session_data_field(session_id, "data.additional_details", {})
+                
                 return "Thank you for confirming. Now I'll collect some additional information. What is the Employment Type of the patient?\n1. SALARIED\n2. SELF-EMPLOYED"
 
             chat_history.append(HumanMessage(content=message))
@@ -466,32 +472,29 @@ class CarepayAgent:
                 # Use direct sequential flow instead of full agent for efficiency
                 ai_message = self._handle_additional_details_collection(session_id, message)
                 
-                # Refresh session data after the collection method has updated it
-                session = self.get_session_from_db(session_id)
-                if not session:
-                    logger.error(f"Session {session_id} not found after collection update")
-                    return "Session error. Please start a new conversation."
+                # Update only the conversation history using targeted field updates
+                # First get fresh session to append to existing history
+                fresh_session = self.get_session_from_db(session_id)
+                if fresh_session:
+                    fresh_chat_history = fresh_session.get("history", [])
+                    fresh_chat_history.append(HumanMessage(content=message))
+                    fresh_chat_history.append(AIMessage(content=ai_message))
+                    
+                    # Update history and serializable_history without overwriting audit trail data
+                    self.update_session_data_field(session_id, "history", fresh_chat_history)
+                    
+                    # Update serializable history
+                    fresh_serializable_history = fresh_session.get("serializable_history", [])
+                    fresh_serializable_history.append({
+                        "type": "HumanMessage",
+                        "content": message
+                    })
+                    fresh_serializable_history.append({
+                        "type": "AIMessage", 
+                        "content": ai_message
+                    })
+                    self.update_session_data_field(session_id, "serializable_history", fresh_serializable_history)
                 
-                chat_history.append(AIMessage(content=ai_message))
-                session["history"] = chat_history
-                
-                # Update serializable_history for this special case too
-                if "serializable_history" not in session:
-                    session["serializable_history"] = []
-                
-                # Add the human message to serializable history
-                session["serializable_history"].append({
-                    "type": "HumanMessage",
-                    "content": message
-                })
-                
-                # Add the AI response to serializable history
-                session["serializable_history"].append({
-                    "type": "AIMessage",
-                    "content": ai_message
-                })
-                
-                self.update_session_in_db(session_id, session)
                 return ai_message
             
             logger.info(f"Session {session_id}: Using full agent executor (status: {current_status})")
@@ -544,28 +547,11 @@ class CarepayAgent:
             
             # Extract LLM response and add to history
             ai_message = response.get("output", "I don't know how to respond to that.")
-            chat_history.append(AIMessage(content=ai_message))
-            
-            # Also update serializable_history
-            if "serializable_history" not in session:
-                session["serializable_history"] = []
-            
-            # Add the human message
-            session["serializable_history"].append({
-                "type": "HumanMessage",
-                "content": message
-            })
-            
-            # Add the AI response
-            session["serializable_history"].append({
-                "type": "AIMessage",
-                "content": ai_message
-            })
             
             # Check if this is a bureau decision response
             if "bureau decision" in ai_message.lower() and any(plan in ai_message for plan in ["Plan:", "Plan", "EMI:", "/0", "/5", "/1"]):
                 # Mark as decision sent (but we'll proceed directly to additional data collection)
-                session["status"] = "bureau_decision_sent"
+                self.update_session_data_field(session_id, "status", "bureau_decision_sent")
                 logger.info(f"Session {session_id} marked as bureau_decision_sent")
                 
                 # We no longer need explicit acknowledgment since we're moving directly to additional data collection
@@ -577,16 +563,39 @@ class CarepayAgent:
                 "application requires **INCOME VERIFICATION**" in ai_message) and
                 "what is the employment type of the patient?" in ai_message.lower()):
                 # Mark session as collecting additional details
-                session["status"] = "collecting_additional_details"
-                # Initialize the additional_details dictionary and collection_step
-                if "additional_details" not in session["data"]:
-                    session["data"]["additional_details"] = {}
-                session["data"]["collection_step"] = "employment_type"
+                self.update_session_data_field(session_id, "status", "collecting_additional_details")
+                self.update_session_data_field(session_id, "data.collection_step", "employment_type")
+                
+                # Initialize additional_details if it doesn't exist
+                current_session = self.get_session_from_db(session_id)
+                if current_session and current_session.get("data", {}).get("additional_details") is None:
+                    self.update_session_data_field(session_id, "data.additional_details", {})
+                
                 logger.info(f"Session {session_id} marked as collecting_additional_details")
 
-            # Save updated history to session
-            session["history"] = chat_history
-            self.update_session_in_db(session_id, session)
+            # Update conversation history using targeted field updates to preserve audit trail data
+            chat_history.append(AIMessage(content=ai_message))
+            
+            # Get fresh session for serializable history update
+            fresh_session = self.get_session_from_db(session_id)
+            if fresh_session:
+                fresh_serializable_history = fresh_session.get("serializable_history", [])
+                
+                # Add the human message
+                fresh_serializable_history.append({
+                    "type": "HumanMessage",
+                    "content": message
+                })
+                
+                # Add the AI response
+                fresh_serializable_history.append({
+                    "type": "AIMessage",
+                    "content": ai_message
+                })
+                
+                # Update only history fields without overwriting audit trail data
+                self.update_session_data_field(session_id, "history", chat_history)
+                self.update_session_data_field(session_id, "serializable_history", fresh_serializable_history)
             
             return ai_message
         
@@ -602,7 +611,7 @@ class CarepayAgent:
             session_id: Session ID (required)
             
         Returns:
-            Session data as JSON string
+            Session data as JSON string with comprehensive data view
         """
         if not session_id:
             return "Session ID not found"
@@ -611,32 +620,52 @@ class CarepayAgent:
         if not session:
             return "Session ID not found"
         
-        # Create a serializable copy of the session
-        serializable_session = {
-            "id": session.get("id"),
-            "status": session.get("status"),
-            "created_at": session.get("created_at"),
-            "data": session.get("data", {}),
-            "phone_number": session.get("phone_number")
+        # Create a comprehensive view of session data
+        comprehensive_session = {
+            "session_info": {
+                "id": session.get("id"),
+                "status": session.get("status"),
+                "created_at": session.get("created_at"),
+                "phone_number": session.get("phone_number")
+            },
+            "user_data": session.get("data", {}),
+            "conversation_history": []
         }
         
         # Convert history to serializable format
-        serializable_history = []
         if "history" in session:
             for msg in session["history"]:
                 if hasattr(msg, "content"):  # Check if it's a Message object
-                    serializable_history.append({
+                    comprehensive_session["conversation_history"].append({
                         "type": msg.__class__.__name__,
                         "content": msg.content
                     })
                 elif isinstance(msg, dict):
-                    serializable_history.append(msg)
+                    comprehensive_session["conversation_history"].append(msg)
                 else:
-                    serializable_history.append(str(msg))
+                    comprehensive_session["conversation_history"].append(str(msg))
         
-        serializable_session["history"] = serializable_history
+        # Add summary of stored data
+        data = session.get("data", {})
+        data_summary = {
+            "core_user_data": {
+                "userId": data.get("userId"),
+                "fullName": data.get("fullName") or data.get("name"),
+                "phoneNumber": data.get("phoneNumber") or data.get("phone"),
+                "treatmentCost": data.get("treatmentCost"),
+                "monthlyIncome": data.get("monthlyIncome"),
+            },
+            "api_responses_count": len(data.get("api_responses", {})),
+            "api_requests_count": len(data.get("api_requests", {})),
+            "prefill_data_available": bool(data.get("prefill_data")),
+            "employment_data_available": bool(data.get("employment_data")),
+            "bureau_decision_available": bool(data.get("bureau_decision_details")),
+            "additional_details_available": bool(data.get("additional_details")),
+        }
         
-        return json.dumps(serializable_session)
+        comprehensive_session["data_summary"] = data_summary
+        
+        return json.dumps(comprehensive_session, indent=2)
     
     # Tool implementations
     
@@ -668,20 +697,18 @@ class CarepayAgent:
             # Check if user_id is present in the data
             if 'user_id' in data or 'userId' in data:
                 user_id = data.get('user_id') or data.get('userId')
-                # Also store in session data for completeness
-                session = self.get_session_from_db(session_id)
-                if session:
-                    session["data"]["userId"] = user_id
-                    self.update_session_in_db(session_id, session)
+                # Store userId using update_session_data_field
+                self.update_session_data_field(session_id, "data.userId", user_id)
             
-            # Update session data
-            session = self.get_session_from_db(session_id)
-            if session:
-                session["data"].update(data)
-                logger.info(f"Session data updated: {session['data']}")
-                
-                # Save updated session to database
-                self.update_session_in_db(session_id, session)
+            # Store each piece of user data systematically
+            for key, value in data.items():
+                if key not in ['user_id']:  # Skip user_id as we handle it above as userId
+                    self.update_session_data_field(session_id, f"data.{key}", value)
+            
+            # Also store the raw input for reference
+            self.update_session_data_field(session_id, "data.user_input.store_user_data", data)
+            
+            logger.info(f"User data stored systematically in session {session_id}: {data}")
             
             return f"Data successfully stored in session {session_id}"
         except Exception as e:
@@ -703,32 +730,26 @@ class CarepayAgent:
             result = self.api_client.get_user_id_from_phone_number(phone_number)
             logger.info(f"API response from get_user_id_from_phone_number: {result}")
             
+            # Store the complete API response in session data
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_responses.get_user_id_from_phone_number", result)
+            
             # If successful, extract userId and store in session
             if result.get("status") == 200 and session_id:
-                session = self.get_session_from_db(session_id)
-                if session:
-                    # According to the problem description, result.get("data") is the userId string.
-                    user_id_from_api = result.get("data")
-                    
-                    # Ensure extracted_user_id is a non-empty string
-                    if isinstance(user_id_from_api, str) and user_id_from_api:
-                        # Store userId in session.data.userId as per instruction
-                        session["data"]["userId"] = user_id_from_api
-                        logger.info(f"Stored userId '{user_id_from_api}' in session data for session {session_id}")
-                        
-                        # The original code also updated self.sessions[session_id]["user_id"].
-                        # Maintaining this for consistency, assuming it might be used elsewhere.
-                        # session["user_id"] = user_id_from_api
-                        # logger.info(f"Also updated user_id '{user_id_from_api}' at session root for session {session_id}")
-                        
-                        # Save updated session to database
-                        self.update_session_in_db(session_id, session)
-                    else:
-                        logger.warning(
-                            f"UserId not found or is not a string in API response's 'data' field. "
-                            f"Received: '{user_id_from_api}' (type: {type(user_id_from_api).__name__}) "
-                            f"for session {session_id}."
-                        )
+                # According to the problem description, result.get("data") is the userId string.
+                user_id_from_api = result.get("data")
+                
+                # Ensure extracted_user_id is a non-empty string
+                if isinstance(user_id_from_api, str) and user_id_from_api:
+                    # Store userId in session.data.userId as per instruction
+                    self.update_session_data_field(session_id, "data.userId", user_id_from_api)
+                    logger.info(f"Stored userId '{user_id_from_api}' in session data for session {session_id}")
+                else:
+                    logger.warning(
+                        f"UserId not found or is not a string in API response's 'data' field. "
+                        f"Received: '{user_id_from_api}' (type: {type(user_id_from_api).__name__}) "
+                        f"for session {session_id}."
+                    )
             
             return json.dumps(result)
         except Exception as e:
@@ -750,26 +771,25 @@ class CarepayAgent:
             # If user_id is not provided, try to get from session
             if not user_id and session_id:
                 session = self.get_session_from_db(session_id)
-                if session and session.get("user_id"):
-                    user_id = session.get("user_id")
+                if session and session.get("data", {}).get("userId"):
+                    user_id = session["data"]["userId"]
                     
             if not user_id:
                 return "User ID is required to get prefill data"
                 
             result = self.api_client.get_prefill_data(user_id)
             
+            # Store the complete API response in session data
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_responses.get_prefill_data", result)
+            
             # If successful, store important prefill data in session
             if result.get("status") == 200 and session_id:
                 try:
                     # Store the full API response for use by other methods like process_address_data
                     if "data" in result and "response" in result["data"]:
-                        session = self.get_session_from_db(session_id)
-                        if session:
-                            session["data"]["prefill_api_response"] = result["data"]["response"]
-                            logger.info(f"Stored full prefill API response in session for user ID: {user_id}")
-                            
-                            # Save updated session to database
-                            self.update_session_in_db(session_id, session)
+                        self.update_session_data_field(session_id, "data.prefill_api_response", result["data"]["response"])
+                        logger.info(f"Stored full prefill API response in session for user ID: {user_id}")
                     
                     response_data = result.get("data", {}).get("response", {})
                     prefill_data = {}
@@ -798,15 +818,10 @@ class CarepayAgent:
                             if isinstance(first_email, dict) and "email" in first_email:
                                 prefill_data["emailId"] = first_email["email"]
                     
-                    # Store in session data
+                    # Store in session data using update_session_data_field
                     if prefill_data:
-                        session = self.get_session_from_db(session_id)
-                        if session:
-                            session["data"]["prefill_data"] = prefill_data
-                            logger.info(f"Stored prefill data in session: {prefill_data}")
-                            
-                            # Save updated session to database
-                            self.update_session_in_db(session_id, session)
+                        self.update_session_data_field(session_id, "data.prefill_data", prefill_data)
+                        logger.info(f"Stored prefill data in session: {prefill_data}")
                 except Exception as e:
                     logger.warning(f"Error processing prefill data: {e}")
             
@@ -829,8 +844,20 @@ class CarepayAgent:
             
             if not user_id:
                 return "User ID is required"
+            
+            # Store the data being sent to the API
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_requests.save_address_details", {
+                    "user_id": user_id,
+                    "address": address
+                })
                 
             result = self.api_client.save_address_details(user_id, address)
+            
+            # Store the API response
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_responses.save_address_details", result)
+            
             return json.dumps(result)
         except Exception as e:
             logger.error(f"Error saving address details: {e}")
@@ -854,13 +881,17 @@ class CarepayAgent:
             # If user_id is not provided, try to get from session
             if not user_id and session_id:
                 session = self.get_session_from_db(session_id)
-                if session and session.get("user_id"):
-                    user_id = session.get("user_id")
+                if session and session.get("data", {}).get("userId"):
+                    user_id = session["data"]["userId"]
                     
             if not user_id:
                 return "User ID is required to get employment verification"
                 
             result = self.api_client.get_employment_verification(user_id)
+            
+            # Store the complete API response in session data
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_responses.get_employment_verification", result)
             
             # If successful, store important employment data in session
             if result.get("status") == 200 and session_id:
@@ -880,15 +911,10 @@ class CarepayAgent:
                         if "establishment_name" in employer_data:
                             employment_data["organizationName"] = employer_data["establishment_name"]
                     
-                    # Store in session
+                    # Store in session using update_session_data_field
                     if employment_data:
-                        session = self.get_session_from_db(session_id)
-                        if session:
-                            session["data"]["employment_data"] = employment_data
-                            logger.info(f"Stored employment data in session: {employment_data}")
-                            
-                            # Save updated session to database
-                            self.update_session_in_db(session_id, session)
+                        self.update_session_data_field(session_id, "data.employment_data", employment_data)
+                        logger.info(f"Stored employment data in session: {employment_data}")
                 except Exception as e:
                     logger.warning(f"Error processing employment data: {e}")
             
@@ -937,13 +963,25 @@ class CarepayAgent:
                 # Try to get user ID from session if not provided in input
                 if session_id:
                     session = self.get_session_from_db(session_id)
-                    if session and session.get("user_id"):
-                        user_id = session.get("user_id")
+                    if session and session.get("data", {}).get("userId"):
+                        user_id = session["data"]["userId"]
                 
             if not user_id:
                 return "User ID is required"
+            
+            # Store the data being sent to the API
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_requests.save_basic_details", {
+                    "user_id": user_id,
+                    "data": data.copy()
+                })
                 
             result = self.api_client.save_basic_details(user_id, data)
+            
+            # Store the API response
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_responses.save_basic_details", result)
+            
             return json.dumps(result)
         except Exception as e:
             logger.error(f"Error saving basic details: {e}")
@@ -973,8 +1011,8 @@ class CarepayAgent:
             # Try to get user ID from session if not provided in input
             if not user_id and session_id:
                 session = self.get_session_from_db(session_id)
-                if session and session.get("user_id"):
-                    user_id = session.get("user_id")
+                if session and session.get("data", {}).get("userId"):
+                    user_id = session["data"]["userId"]
             
             if not user_id:
                 return "User ID is required"
@@ -1001,8 +1039,20 @@ class CarepayAgent:
             # Make sure we have the form status
             if 'formStatus' not in data:
                 data['formStatus'] = "Employment"
+            
+            # Store the data being sent to the API
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_requests.save_employment_details", {
+                    "user_id": user_id,
+                    "data": data.copy()
+                })
                 
             result = self.api_client.save_employment_details(user_id, data)
+            
+            # Store the API response
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_responses.save_employment_details", result)
+            
             return json.dumps(result)
         except Exception as e:
             logger.error(f"Error saving employment details: {e}")
@@ -1037,8 +1087,23 @@ class CarepayAgent:
             
             if not user_id or not name or not loan_amount:
                 return "User ID, name, and loan amount are required"
+            
+            # Store the data being sent to the API
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_requests.save_loan_details", {
+                    "user_id": user_id,
+                    "name": name,
+                    "loan_amount": loan_amount,
+                    "doctor_name": doctor_name,
+                    "doctor_id": doctor_id
+                })
                 
             result = self.api_client.save_loan_details(user_id, name, loan_amount, doctor_name, doctor_id)
+            
+            # Store the API response
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_responses.save_loan_details", result)
+            
             return json.dumps(result)
         except Exception as e:
             logger.error(f"Error saving loan details: {e}")
@@ -1059,26 +1124,25 @@ class CarepayAgent:
             # If user_id is not provided, try to get from session
             if not user_id and session_id:
                 session = self.get_session_from_db(session_id)
-                if session and session.get("user_id"):
-                    user_id = session.get("user_id")
+                if session and session.get("data", {}).get("userId"):
+                    user_id = session["data"]["userId"]
                     
             if not user_id:
                 return "User ID is required to get loan details"
                 
             result = self.api_client.get_loan_details_by_user_id(user_id)
             
+            # Store the complete API response in session data
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_responses.get_loan_details", result)
+            
             # If successful, extract loanId and store in session for future use
             if result.get("status") == 200 and session_id:
                 data = result.get("data", {})
                 if isinstance(data, dict) and "loanId" in data:
                     loan_id = data["loanId"]
-                    session = self.get_session_from_db(session_id)
-                    if session:
-                        session["data"]["loanId"] = loan_id
-                        logger.info(f"Stored loanId {loan_id} in session {session_id}")
-                        
-                        # Save updated session to database
-                        self.update_session_in_db(session_id, session)
+                    self.update_session_data_field(session_id, "data.loanId", loan_id)
+                    logger.info(f"Stored loanId {loan_id} in session {session_id}")
             
             return json.dumps(result)
         except Exception as e:
@@ -1109,23 +1173,21 @@ class CarepayAgent:
             logger.info(f"Requesting bureau report for loan ID: {loan_id}")    
             result = self.api_client.get_experian_bureau_report(loan_id)
             
+            # Store the complete API response in session data
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_responses.get_bureau_report", result)
+            
             # Create a truncated version of the result with only essential information
             truncated_result = {
                 "status": result.get("status"),
                 "message": "Bureau report retrieved successfully" if result.get("status") == 200 else "Error retrieving bureau report"
             }
             
-            # Store the full bureau report in the session for reference, but don't return it
+            # Store the bureau report status and retrieval flag in session
             if session_id:
-                session = self.get_session_from_db(session_id)
-                if session:
-                    session["data"]["bureau_report_status"] = truncated_result
-                    # Also store if we successfully retrieved the report (for use in later steps)
-                    session["data"]["bureau_report_retrieved"] = (result.get("status") == 200)
-                    logger.info(f"Stored bureau report status in session for loan ID: {loan_id}")
-                    
-                    # Save updated session to database
-                    self.update_session_in_db(session_id, session)
+                self.update_session_data_field(session_id, "data.bureau_report_status", truncated_result)
+                self.update_session_data_field(session_id, "data.bureau_report_retrieved", (result.get("status") == 200))
+                logger.info(f"Stored bureau report status in session for loan ID: {loan_id}")
             
             # Enhanced logging to ensure visibility
             logger.info(f"Bureau Report Response - Status: {result.get('status')}")
@@ -1204,6 +1266,10 @@ class CarepayAgent:
             # Make the API call
             result = self.api_client.get_bureau_decision(doctor_id, loan_id, regenerate_param)
             
+            # Store the complete API response in session data
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_responses.get_bureau_decision", result)
+            
             # Log the raw API response for debugging
             logger.info(f"Bureau decision API response for loan ID {loan_id}: {json.dumps(result)}")
             
@@ -1250,17 +1316,11 @@ class CarepayAgent:
             # Process result to extract and format eligible EMI information
             if isinstance(result, dict) and result.get("status") == 200:
                 bureau_result = self.extract_bureau_decision_details(result, session_id)
-                # Store the result in session for easy reference
+                # Store the result in session for easy reference using update_session_data_field
                 if session_id:
-                    session = self.get_session_from_db(session_id)
-                    if session:
-                        session["data"]["bureau_decision_details"] = bureau_result
-                        # Also store the treatment cost logic result
-                        session["data"]["show_detailed_approval"] = show_detailed_approval
-                        logger.info(f"Stored bureau decision details in session: {bureau_result}")
-                        
-                        # Save updated session to database
-                        self.update_session_in_db(session_id, session)
+                    self.update_session_data_field(session_id, "data.bureau_decision_details", bureau_result)
+                    self.update_session_data_field(session_id, "data.show_detailed_approval", show_detailed_approval)
+                    logger.info(f"Stored bureau decision details in session: {bureau_result}")
             
             return json.dumps(result)
         except Exception as e:
@@ -1404,8 +1464,7 @@ class CarepayAgent:
                 session = self.get_session_from_db(session_id)
                 if session:
                     # Try different places where userId might be stored
-                    user_id = session.get("user_id")
-                    if not user_id and "data" in session:
+                    if "data" in session:
                         session_data = session["data"]
                         user_id = session_data.get("userId") or session_data.get("user_id")
                         
@@ -1573,10 +1632,8 @@ class CarepayAgent:
                     
                     # Store in session for future use
                     if session_id:
-                        session = self.get_session_from_db(session_id)
-                        if session:
-                            session["data"]["prefill_api_response"] = prefill_data
-                            self.update_session_in_db(session_id, session)
+                        # Use update_session_data_field to preserve existing audit trail data
+                        self.update_session_data_field(session_id, "data.prefill_api_response", prefill_data)
             
             if not prefill_data:
                 return json.dumps({"error": "No prefill data available to extract address"})
@@ -1615,8 +1672,16 @@ class CarepayAgent:
                     
                     logger.info(f"Extracted address data: {address_data}")
                     
+                    # Store the extracted address data in session
+                    if session_id:
+                        self.update_session_data_field(session_id, "data.extracted_address_data", address_data)
+                    
                     # Save the address details
                     result = self.api_client.save_address_details(user_id, address_data)
+                    
+                    # Store the API response
+                    if session_id:
+                        self.update_session_data_field(session_id, "data.api_responses.process_address_data", result)
                     
                     return json.dumps(result)
                 else:
@@ -1659,9 +1724,7 @@ class CarepayAgent:
                 # Try to get user ID from session if not provided in input
                 if session_id:
                     session = self.get_session_from_db(session_id)
-                    if session and session.get("user_id"):
-                        user_id = session.get("user_id")
-                    elif session and session.get("data", {}).get("userId"):
+                    if session and session.get("data", {}).get("userId"):
                         user_id = session["data"]["userId"]
                 
                 if not user_id:
@@ -1669,6 +1732,10 @@ class CarepayAgent:
             
             logger.info(f"Performing PAN verification for user ID: {user_id}")
             result = self.api_client.pan_verification(user_id)
+            
+            # Store the complete API response in session data
+            if session_id:
+                self.update_session_data_field(session_id, "data.api_responses.pan_verification", result)
             
             # Ensure result is JSON serializable
             if isinstance(result, dict):
@@ -1736,8 +1803,10 @@ class CarepayAgent:
             workplace_pincode = data.get('workplacePincode', '')
             
             # Create additional_details field if it doesn't exist
-            if 'additional_details' not in session["data"]:
-                session["data"]["additional_details"] = {}
+            current_additional_details = {}
+            current_session = self.get_session_from_db(session_id)
+            if current_session and "data" in current_session and "additional_details" in current_session["data"]:
+                current_additional_details = current_session["data"]["additional_details"]
             
             # Update additional details
             additional_details = {
@@ -1754,17 +1823,17 @@ class CarepayAgent:
             elif employment_type == "SELF-EMPLOYED" and business_name:
                 additional_details["business_name"] = business_name
                 
-            # Update session data
-            session["data"]["additional_details"].update(additional_details)
+            # Merge with existing additional details
+            current_additional_details.update(additional_details)
+                
+            # Use update_session_data_field to preserve existing API audit trail data
+            self.update_session_data_field(session_id, "data.additional_details", current_additional_details)
             
-            # Save updated session to database
-            self.update_session_in_db(session_id, session)
-            
-            # Try to get user ID from session
-            user_id = session["data"].get("userId")
-            # doctor_id = session["data"].get("doctorId")
-            # doctor_name = session["data"].get("doctorName")
-            # print(f"User ID: {user_id}")
+            # Get user ID from current session (fetch fresh data)
+            current_session = self.get_session_from_db(session_id)
+            user_id = None
+            if current_session and "data" in current_session:
+                user_id = current_session["data"].get("userId")
             
             # If we have a user ID, send employment details to API
             if user_id:
@@ -1837,17 +1906,10 @@ class CarepayAgent:
             
             # Function to save the current collection step and refresh session
             def update_collection_step(new_step):
-                # Get fresh session data
-                current_session = self.get_session_from_db(session_id)
-                if current_session:
-                    current_session["data"]["collection_step"] = new_step
-                    # Also ensure the status is properly set
-                    current_session["status"] = "collecting_additional_details"
-                    logger.info(f"Session {session_id}: Updated collection step to '{new_step}'")
-                    self.update_session_in_db(session_id, current_session)
-                    # Update the local session variable to reflect changes
-                    nonlocal session
-                    session = current_session
+                # Use update_session_data_field to preserve existing data
+                self.update_session_data_field(session_id, "data.collection_step", new_step)
+                self.update_session_data_field(session_id, "status", "collecting_additional_details")
+                logger.info(f"Session {session_id}: Updated collection step to '{new_step}'")
             
             # Handle employment type input (first step)
             if collection_step == "employment_type":
@@ -1860,8 +1922,8 @@ class CarepayAgent:
                 else:
                     return "Please select a valid option for Employment Type: 1. SALARIED or 2. SELF-EMPLOYED"
                 
-                # Update session data with employment type
-                session["data"]["additional_details"] = additional_details
+                # Update session data with employment type using update_session_data_field
+                self.update_session_data_field(session_id, "data.additional_details", additional_details)
                 
                 # Update collection step and ask for marital status
                 update_collection_step("marital_status")
@@ -1883,8 +1945,8 @@ please Enter input 1 or 2 only"""
                 else:
                     return "Please select a valid option for Marital Status: 1. Married or 2. Unmarried/Single"
                 
-                # Update session data with marital status
-                session["data"]["additional_details"] = additional_details
+                # Update session data with marital status using update_session_data_field
+                self.update_session_data_field(session_id, "data.additional_details", additional_details)
                 
                 # Update collection step and ask for education qualification
                 update_collection_step("education_qualification")
@@ -1918,8 +1980,8 @@ Please Enter input between 1 to 7 only"""
                 else:
                     return "Please select a valid option for Education Qualification (1-7)"
                 
-                # Update session data with education qualification
-                session["data"]["additional_details"] = additional_details
+                # Update session data with education qualification using update_session_data_field
+                self.update_session_data_field(session_id, "data.additional_details", additional_details)
                 
                 # Update collection step and ask for treatment reason
                 update_collection_step("treatment_reason")
@@ -1931,16 +1993,18 @@ What is the name of treatment?"""
             elif collection_step == "treatment_reason":
                 additional_details["treatment_reason"] = message.strip()
                 
-                # Update session data with treatment reason
-                session["data"]["additional_details"] = additional_details
+                # Update session data with treatment reason using update_session_data_field
+                self.update_session_data_field(session_id, "data.additional_details", additional_details)
                 
                 # Update collection step and ask organization/business name based on employment type
                 if additional_details.get("employment_type") == "SALARIED":
+                    additional_details["organization_name"] = ""  # Initialize organization name
                     update_collection_step("organization_name")
                     return f"""Treatment reason noted: {message.strip()}
 
 What is the Organization Name where the patient works?"""
                 else:
+                    additional_details["business_name"] = ""  # Initialize business name
                     update_collection_step("business_name")
                     return f"""Treatment reason noted: {message.strip()}
 
@@ -1950,8 +2014,8 @@ What is the Business Name of the patient?"""
             elif collection_step == "organization_name":
                 additional_details["organization_name"] = message.strip()
                 
-                # Update session data
-                session["data"]["additional_details"] = additional_details
+                # Update session data using update_session_data_field
+                self.update_session_data_field(session_id, "data.additional_details", additional_details)
                 
                 # Update collection step to ask for workplace pincode
                 update_collection_step("workplace_pincode")
@@ -1964,8 +2028,8 @@ Please enter 6 digits:"""
             elif collection_step == "business_name":
                 additional_details["business_name"] = message.strip()
                 
-                # Update session data
-                session["data"]["additional_details"] = additional_details
+                # Update session data using update_session_data_field
+                self.update_session_data_field(session_id, "data.additional_details", additional_details)
                 
                 # Update collection step to ask for workplace pincode
                 update_collection_step("workplace_pincode")
@@ -1983,8 +2047,8 @@ Please enter 6 digits:"""
                 
                 additional_details["workplacePincode"] = pincode
                 
-                # Update session data
-                session["data"]["additional_details"] = additional_details
+                # Update session data using update_session_data_field
+                self.update_session_data_field(session_id, "data.additional_details", additional_details)
                 
                 # Mark collection as complete
                 update_collection_step("complete")
@@ -1994,13 +2058,12 @@ Please enter 6 digits:"""
                 details_to_save = dict(additional_details)
                 result = self.save_additional_user_details(json.dumps(details_to_save), session_id)
                 
-                # Change session status to completed but keep session active
-                session["status"] = "additional_details_completed"
-                session["data"]["details_collection_timestamp"] = datetime.now().isoformat()
+                # Use update_session_data_field to preserve existing data instead of overwriting
+                self.update_session_data_field(session_id, "status", "additional_details_completed")
+                self.update_session_data_field(session_id, "data.details_collection_timestamp", datetime.now().isoformat())
                 
                 # Get profile link to show to the user
                 profile_link = self._get_profile_link(session_id)
-                self.update_session_in_db(session_id, session)
                 
                 return f"""Workplace pincode noted: {pincode}
 
@@ -2042,10 +2105,10 @@ You can track your application progress and next step of process"""
             # Get doctor ID from session
             doctor_id = session["data"].get("doctorId") or session["data"].get("doctor_id")
             
-            # # If doctor_id not found, use a default
-            # if not doctor_id:
-            #     doctor_id = "e71779851b144d1d9a25a538a03612fc"  # Default doctor ID as fallback
-            #     logger.warning(f"Using default doctor_id for profile link: {doctor_id}")
+            # If doctor_id not found, use a default
+            if not doctor_id:
+                doctor_id = "e71779851b144d1d9a25a538a03612fc"  # Default doctor ID as fallback
+                logger.warning(f"Using default doctor_id for profile link: {doctor_id}")
                 
             # Call API to get profile completion link
             profile_link_response = self.api_client.get_profile_completion_link(doctor_id)
@@ -2061,18 +2124,16 @@ You can track your application progress and next step of process"""
                 # Store the cleaned link in session for future reference
                 session["data"]["profile_completion_link"] = profile_link
                 
-               
                 return profile_link
-                 # Fallback URL
             else:
                 logger.error(f"Error getting profile link: {profile_link_response}")
                 fallback_url = "https://carepay.money/patient/Gurgaon/Nikhil_Dental_Clinic/Nikhil_Salkar/e71779851b144d1d9a25a538a03612fc/"
-                return Helper.clean_url(fallback_url)  # Clean fallback URL as well
+                return Helper.clean_url(fallback_url)
                 
         except Exception as e:
             logger.error(f"Error getting profile completion link: {e}")
             fallback_url = "https://carepay.money/patient/Gurgaon/Nikhil_Dental_Clinic/Nikhil_Salkar/e71779851b144d1d9a25a538a03612fc/"
-            return Helper.clean_url(fallback_url)  # Clean fallback URL as well
+            return Helper.clean_url(fallback_url)
 
     def _process_employment_data_from_additional_details(self, session_id: str) -> Dict[str, Any]:
         """
@@ -2091,26 +2152,27 @@ You can track your application progress and next step of process"""
                 return {}
                 
             additional_details = session["data"].get("additional_details", {})
+            session_data = session["data"]
             
             # Create employment data structure
             employment_data = {}
 
-            if "monthlyIncome" in session["data"]:
-                employment_data["monthlyFamilyIncome"] = session["data"]["monthlyIncome"]
-            elif "monthlyFamilyIncome" in session["data"]:
-                employment_data["monthlyFamilyIncome"] = session["data"]["monthlyFamilyIncome"]
+            if "monthlyIncome" in session_data:
+                employment_data["monthlyFamilyIncome"] = session_data["monthlyIncome"]
+            elif "monthlyFamilyIncome" in session_data:
+                employment_data["monthlyFamilyIncome"] = session_data["monthlyFamilyIncome"]
 
-            if "monthlyIncome" in session["data"]:
-                employment_data["netTakeHomeSalary"] = session["data"]["monthlyIncome"]
+            if "monthlyIncome" in session_data:
+                employment_data["netTakeHomeSalary"] = session_data["monthlyIncome"]
             
             # Map employment type
             if additional_details.get("employment_type"):
                 employment_data["employmentType"] = additional_details["employment_type"]
             
             # Map organization or business name
-            if employment_data["employmentType"] == "SALARIED" and additional_details.get("organization_name"):
+            if employment_data.get("employmentType") == "SALARIED" and additional_details.get("organization_name"):
                 employment_data["organizationName"] = additional_details["organization_name"]
-            elif employment_data["employmentType"] == "SELF-EMPLOYED" and additional_details.get("business_name"):
+            elif employment_data.get("employmentType") == "SELF-EMPLOYED" and additional_details.get("business_name"):
                 employment_data["nameOfBusiness"] = additional_details["business_name"]
                 
             # Map workplace pincode if available
@@ -2142,7 +2204,7 @@ You can track your application progress and next step of process"""
                 return {}
                 
             additional_details = session["data"].get("additional_details", {})
-            user_id = session["data"].get("userId") or session["data"].get("user_id")
+            user_id = session["data"].get("userId")
             session_data = session["data"]
             
             # Create loan data structure with required fields
@@ -2200,22 +2262,23 @@ You can track your application progress and next step of process"""
                 return {}
                 
             additional_details = session["data"].get("additional_details", {})  
-            user_id = session["data"].get("userId") or session["data"].get("user_id")
+            user_id = session["data"].get("userId")
+            session_data = session["data"]
          
             # Create basic details structure with userId
             basic_details = {
                 "userId": user_id
             }
 
-            if "name" in session["data"]:
-                basic_details["fullName"] = session["data"]["name"]
-            elif "fullName" in session["data"]:
-                basic_details["fullName"] = session["data"]["fullName"]
+            if "name" in session_data:
+                basic_details["fullName"] = session_data["name"]
+            elif "fullName" in session_data:
+                basic_details["fullName"] = session_data["fullName"]
             
-            if "phoneNumber" in session["data"]:
-                basic_details["mobileNumber"] = session["data"]["phoneNumber"]
-            elif "phone" in session["data"]:
-                basic_details["mobileNumber"] = session["data"]["phone"]
+            if "phoneNumber" in session_data:
+                basic_details["mobileNumber"] = session_data["phoneNumber"]
+            elif "phone" in session_data:
+                basic_details["mobileNumber"] = session_data["phone"]
             
             # Map marital status: 1 -> Yes, 2 -> No
             if "marital_status" in additional_details:
@@ -2337,4 +2400,3 @@ You can track your application progress and next step of process"""
                 description="Get profile link for a user",
             ),
         ]
-
