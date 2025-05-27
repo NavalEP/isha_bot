@@ -88,7 +88,7 @@ class CarepayAgent:
            - Extract from the response: PAN number, gender, DOB, email (if available)
            - didn't forget the userId what give to process_prefill_data_for_basic_details
            - Use the process_prefill_data_for_basic_details tool to formate process_prefill_data for save_basic_details in process_prefill_data_for_basic_details there i calling save_basic_details with userId and prefill data as input  and also give userId in process_prefill_data_for_basic_details
-           - only if get_prefill_data will show status 500 then return continue you jounry with below provided link here  call get_profile_link tool this take input session_id to get profile link and return that link I encountered an issue while processing the loan. However, you can continue your journey given link here
+           - only if get_prefill_data will show status 500, 404 then must return continue you jounry with below provided link here  must call get_profile_link tool this take input session_id to get profile link and return that link I encountered an issue while processing the loan. However, you can continue your journey given link here
 
         5. Address Processing:
            - didn't miss this step
@@ -2396,7 +2396,7 @@ You can track your application progress and next step of process"""
             ),
             Tool(
                 name="get_profile_link",
-                func=lambda: self._get_profile_link(session_id),
-                description="Get profile link for a user",
+                func=lambda session_id_input: self._get_profile_link(session_id),
+                description="Get profile link for a user using session_id",
             ),
         ]
