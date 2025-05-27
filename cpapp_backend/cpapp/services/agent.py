@@ -195,143 +195,155 @@ class CarepayAgent:
         Always maintain a professional, helpful tone throughout the conversation.
         """
         
-        # Initialize session storage
-        self.sessions = {}
-        
         # Setup agent with tools and prompt
         self.setup_agent()
         
     def setup_agent(self):
         """
-        Set up agent with tools
+        Set up agent (simplified since we now create session-specific agents)
         
         Returns:
-            Agent with tools
+            None (agents are created per session)
         """
-        # Return cached agent executor if it already exists
-        if self.agent_executor is not None:
-            return self.agent_executor
+        # Agent setup is now done per session in the run method
+        # This method is kept for backward compatibility but doesn't create a global agent
+        self.agent_executor = None
+        return None
+    
+    def get_session_from_db(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve session data from the database
+        
+        Args:
+            session_id: Session ID
             
-        # Define tools
-        tools = [
-            Tool(
-                name="get_user_id_from_phone_number",
-                func=self.get_user_id_from_phone_number,
-                
-                description="Get userId from response of API call get_user_id_from_phone_number",
-            ),
-            Tool(
-                name="save_basic_details",
-                func=self.save_basic_details,
-               
-                description="Save user's basic personal details. Must pass either a user ID as a string or a JSON object with userId and other fields like panCard, gender, dateOfBirth, etc.",
-            ),
-            Tool(
-                name="get_prefill_data",
-                func=self.get_prefill_data,
-                
-                description="Get prefilled user data from user ID",
-            ),
-             Tool(
-                name="process_prefill_data",
-                func=self.process_prefill_data_for_basic_details,
-               
-                description="Convert prefill data from get_prefill_data to a properly formatted JSON for save_basic_details. MUST include both prefill_data and user_id parameters.",
-            ),
-            Tool(
-                name="process_address_data",
-                func=self.process_address_data,
-               
-                description="Extract address information from prefill data and save it using save_address_details. Call this after process_prefill_data. Must include userId parameter.",
-            ),
-            Tool(
-                name="save_address_details",
-                func=self.save_address_details,
-               
-                description="Save address details for a user. Requires userId and address object.",
-            ),
-            Tool(
-                name="pan_verification",
-                func=self.pan_verification,
-                
-                description="Verify PAN details for a user",
-            ),
-            Tool(
-                name="get_employment_verification",
-                func=self.get_employment_verification,
-               
-                description="Get employment verification data for a user ID",
-            ),
-           
-            Tool(
-                name="save_employment_details",
-                func=self.save_employment_details,
-                
-                description="Save user's employment details",
-            ),
-            Tool(
-                name="save_loan_details",
-                func=self.save_loan_details,
-                
-                description="Save loan details for the user",
-            ),
-            Tool(
-                name="get_loan_details",
-                func=self.get_loan_details,
-                
-                description="Get loan details for a user",
-            ),
-            Tool(
-                name="get_bureau_report",
-                func=self.get_bureau_report,
-                
-                description="Get bureau report for a loan",
-            ),
-            Tool(
-                name="get_bureau_decision",
-                func=self.get_bureau_decision,
-                
-                description="Get bureau decision for loan application and input is loanId and doctorId that come from get_loan_details",
-            ),
-            Tool(
-                name="get_session_data",
-                func=self.get_session_data,
-                
-                description="Get current session data",
-            ),
-            Tool(
-                name="store_user_data",
-                func=self.store_user_data,
-                
-                description="Store user data in session",
-            ),
-            Tool(
-                name="get_profile_link",
-                func=self._get_profile_link,
-                
-                description="Get profile link for a user",
-            ),
-        ]
-
-        # Create the prompt
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", self.system_prompt),
-            ("human", "{input}"),
-            MessagesPlaceholder(variable_name="chat_history"),
-            MessagesPlaceholder(variable_name="agent_scratchpad"),
-        ])
-
-        # Create agent
-        agent = create_openai_functions_agent(self.llm, tools, prompt)
-        self.agent_executor = AgentExecutor(
-            agent=agent,
-            tools=tools,
-            verbose=True,
-            max_iterations=30,
-            handle_parsing_errors=True,
-        )
-
-        return self.agent_executor
+        Returns:
+            Session data dictionary or None if not found
+        """
+        try:
+            # Convert session_id to UUID if it's a string
+            if isinstance(session_id, str):
+                session_uuid = uuid.UUID(session_id)
+            else:
+                session_uuid = session_id
+            
+            # Get session from database
+            session_data = SessionData.objects.get(session_id=session_uuid)
+            if not session_data:
+                logger.warning(f"Session {session_id} not found in database")
+                return None
+            
+            # Convert serialized history back to Message objects
+            history = []
+            if session_data.history:
+                for msg_data in session_data.history:
+                    if isinstance(msg_data, dict):
+                        msg_type = msg_data.get('type', 'HumanMessage')
+                        content = msg_data.get('content', '')
+                        if msg_type == 'AIMessage':
+                            history.append(AIMessage(content=content))
+                        else:
+                            history.append(HumanMessage(content=content))
+                    else:
+                        # Fallback for non-dict entries
+                        history.append(HumanMessage(content=str(msg_data)))
+            
+            # Reconstruct session dictionary
+            session = {
+                "id": str(session_data.session_id),
+                "data": session_data.data or {},
+                "history": history,
+                "serializable_history": session_data.history or [],
+                "status": session_data.status or "active",
+                "created_at": session_data.created_at.isoformat() if session_data.created_at else datetime.now().isoformat(),
+                "phone_number": session_data.phone_number
+            }
+            
+            return session
+        except Exception as e:
+            logger.error(f"Error retrieving session from database: {e}")
+            return None
+    
+    def update_session_in_db(self, session_id: str, session_data: Dict[str, Any]) -> None:
+        """
+        Update session data in the database
+        
+        Args:
+            session_id: Session ID
+            session_data: Session data dictionary
+        """
+        try:
+            # Convert session_id to UUID if it's a string
+            if isinstance(session_id, str):
+                session_uuid = uuid.UUID(session_id)
+            else:
+                session_uuid = session_id
+            
+            # Convert history to serializable format if needed
+            serializable_history = session_data.get('serializable_history', [])
+            if not serializable_history and 'history' in session_data:
+                serializable_history = []
+                for msg in session_data['history']:
+                    if hasattr(msg, 'content'):  # Check if it's a Message object
+                        msg_type = msg.__class__.__name__
+                        serializable_history.append({
+                            'type': msg_type,
+                            'content': msg.content
+                        })
+                    elif isinstance(msg, dict):
+                        serializable_history.append(msg)
+                    else:
+                        serializable_history.append(str(msg))
+            
+            # Update or create session in database
+            SessionData.objects.update_or_create(
+                session_id=session_uuid,
+                defaults={
+                    'data': session_data.get('data', {}),
+                    'history': serializable_history,
+                    'status': session_data.get('status', 'active'),
+                    'phone_number': session_data.get('phone_number'),
+                }
+            )
+            
+            logger.info(f"Session {session_id} updated in database")
+        except Exception as e:
+            logger.error(f"Error updating session in database: {e}")
+    
+    def update_session_data_field(self, session_id: str, field_path: str, value: Any) -> None:
+        """
+        Update a specific field in session data
+        
+        Args:
+            session_id: Session ID
+            field_path: Dot-separated path to the field (e.g., "data.userId")
+            value: Value to set
+        """
+        try:
+            session = self.get_session_from_db(session_id)
+            if not session:
+                logger.error(f"Session {session_id} not found for field update")
+                return
+            
+            # Navigate to the field using the path
+            path_parts = field_path.split('.')
+            current = session
+            
+            # Navigate to the parent of the target field
+            for part in path_parts[:-1]:
+                if part not in current:
+                    current[part] = {}
+                current = current[part]
+            
+            # Set the value
+            current[path_parts[-1]] = value
+            
+            # Save back to database
+            self.update_session_in_db(session_id, session)
+            
+            logger.info(f"Updated field {field_path} in session {session_id}")
+        except Exception as e:
+            logger.error(f"Error updating session field {field_path}: {e}")
     
     def create_session(self, doctor_id=None, doctor_name=None, phone_number=None) -> str:
         """
@@ -387,12 +399,8 @@ class CarepayAgent:
                 session["data"]["doctor_name"] = doctor_name
                 logger.info(f"Stored doctor_name {doctor_name} in session {session_id}")
             
-            # Store session
-            self.sessions[session_id] = session
-            logger.info(f"Created new session: {session_id}")
-            
             # Save to database
-            self.save_session_to_db(session_id)
+            self.update_session_in_db(session_id, session)
             
             return session_id
         except Exception as e:
@@ -411,66 +419,19 @@ class CarepayAgent:
             Agent response
         """
         try:
-            # Validate session_id
-            if session_id not in self.sessions:
-                # Try to load from database
-                try:
-                    session_data = SessionData.objects.get(session_id=session_id)
-                    if session_data:
-                        # Convert serialized history back to Message objects
-                        history = []
-                        if session_data.history:
-                            for msg in session_data.history:
-                                if isinstance(msg, dict) and 'type' in msg and 'content' in msg:
-                                    if msg['type'] == 'AIMessage':
-                                        history.append(AIMessage(content=msg['content']))
-                                    elif msg['type'] == 'HumanMessage':
-                                        history.append(HumanMessage(content=msg['content']))
-                                    else:
-                                        history.append(msg)  # Keep as is if not recognized
-                                else:
-                                    history.append(msg)  # Keep as is if not in expected format
-                        
-                        # Restore session from database
-                        self.sessions[session_id] = {
-                            "id": str(session_data.session_id),
-                            "data": session_data.data or {},
-                            "history": history,  # Use the converted history
-                            "status": session_data.status or "active",
-                            "phone_number": session_data.phone_number
-                        }
-                        logger.info(f"Session {session_id} restored from database with status: {session_data.status}")
-                        logger.info(f"Session data contains: {list(session_data.data.keys()) if session_data.data else 'No data'}")
-                except SessionData.DoesNotExist:
-                    logger.warning(f"Session {session_id} not found in database")
-                    # Still continue with an empty session to avoid breaking the flow
-                    self.sessions[session_id] = {
-                        "id": session_id,
-                        "data": {},
-                        "history": [],
-                        "status": "active",
-                        "created_at": datetime.now().isoformat()
-                    }
-            else:
-                # Session is already in memory, but let's ensure we have the latest status from database if in additional details collection
-                # This prevents race conditions during concurrent requests
-                current_status = self.sessions[session_id].get("status", "active")
-                if current_status == "collecting_additional_details":
-                    try:
-                        session_data = SessionData.objects.get(session_id=session_id)
-                        if session_data and session_data.status == "collecting_additional_details":
-                            # Update session data from database to get latest collection_step
-                            if session_data.data:
-                                self.sessions[session_id]["data"].update(session_data.data)
-                            logger.info(f"Session {session_id} data refreshed from database during additional details collection")
-                    except SessionData.DoesNotExist:
-                        pass  # Continue with in-memory session
-                        
-            # Set current session for helper methods
-            self._current_session_id = session_id
+            # Get session from database
+            session = self.get_session_from_db(session_id)
+            if not session:
+                logger.warning(f"Session {session_id} not found in database")
+                # Still continue with an empty session to avoid breaking the flow
+                session = {
+                    "id": session_id,
+                    "data": {},
+                    "history": [],
+                    "status": "active",
+                    "created_at": datetime.now().isoformat()
+                }
             
-            # Get session data
-            session = self.sessions[session_id]
             current_status = session.get("status", "active")
             
             # Add debug logging to understand the session state
@@ -478,13 +439,7 @@ class CarepayAgent:
             if "data" in session and "collection_step" in session["data"]:
                 logger.info(f"Session {session_id} collection step: {session['data']['collection_step']}")
             
-            # We're no longer using the 'expired' status to prevent early session termination
-            # Instead, we'll keep the session active regardless of status
-            # This commented code is left for reference
-            # if current_status == "expired" and "decision_reviewed" in session.get("data", {}):
-            #     return "Session has expired after loan decision. Please start a new chat to continue."
-            
-            phone = session.get("data", {}).get("phone", None)
+            phone = session.get("data", {}).get("phoneNumber", None)
             
             logger.info(f"Processing message in session {session_id} with status {current_status} and phone {phone}")
             
@@ -500,7 +455,7 @@ class CarepayAgent:
                 if "additional_details" not in session["data"]:
                     session["data"]["additional_details"] = {}
                 session["data"]["collection_step"] = "employment_type"
-                self.save_session_to_db(session_id)
+                self.update_session_in_db(session_id, session)
                 return "Thank you for confirming. Now I'll collect some additional information. What is the Employment Type of the patient?\n1. SALARIED\n2. SELF-EMPLOYED"
 
             chat_history.append(HumanMessage(content=message))
@@ -510,6 +465,13 @@ class CarepayAgent:
                 logger.info(f"Session {session_id}: Entering additional details collection mode")
                 # Use direct sequential flow instead of full agent for efficiency
                 ai_message = self._handle_additional_details_collection(session_id, message)
+                
+                # Refresh session data after the collection method has updated it
+                session = self.get_session_from_db(session_id)
+                if not session:
+                    logger.error(f"Session {session_id} not found after collection update")
+                    return "Session error. Please start a new conversation."
+                
                 chat_history.append(AIMessage(content=ai_message))
                 session["history"] = chat_history
                 
@@ -529,14 +491,36 @@ class CarepayAgent:
                     "content": ai_message
                 })
                 
-                self.save_session_to_db(session_id)
+                self.update_session_in_db(session_id, session)
                 return ai_message
             
             logger.info(f"Session {session_id}: Using full agent executor (status: {current_status})")
-            # Use LLM to generate response
-            if self.agent_executor is None:
-                self.agent_executor = self.setup_agent()
-            response = self.agent_executor.invoke({"input": message, "chat_history": chat_history})
+            # Create session-specific agent executor with session-aware tools
+            session_tools = self._create_session_aware_tools(session_id)
+            
+            # Create the prompt
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", self.system_prompt),
+                ("human", "{input}"),
+                MessagesPlaceholder(variable_name="chat_history"),
+                MessagesPlaceholder(variable_name="agent_scratchpad"),
+            ])
+
+            # Create session-specific agent
+            agent = create_openai_functions_agent(self.llm, session_tools, prompt)
+            session_agent_executor = AgentExecutor(
+                agent=agent,
+                tools=session_tools,
+                verbose=True,
+                max_iterations=30,
+                handle_parsing_errors=True,
+            )
+            
+            # Use session-specific agent executor
+            response = session_agent_executor.invoke({
+                "input": message, 
+                "chat_history": chat_history
+            })
             
             # Log all intermediate steps to ensure visibility of tool outputs
             if "intermediate_steps" in response:
@@ -602,10 +586,7 @@ class CarepayAgent:
 
             # Save updated history to session
             session["history"] = chat_history
-            self.sessions[session_id] = session
-            
-            # Save updated session to database
-            self.save_session_to_db(session_id)
+            self.update_session_in_db(session_id, session)
             
             return ai_message
         
@@ -618,18 +599,17 @@ class CarepayAgent:
         Get session data for the current session
         
         Args:
-            session_id: Optional session ID, defaults to current session
+            session_id: Session ID (required)
             
         Returns:
             Session data as JSON string
         """
-        if not session_id and hasattr(self, '_current_session_id'):
-            session_id = self._current_session_id
-        
-        if not session_id or session_id not in self.sessions:
+        if not session_id:
             return "Session ID not found"
         
-        session = self.sessions[session_id]
+        session = self.get_session_from_db(session_id)
+        if not session:
+            return "Session ID not found"
         
         # Create a serializable copy of the session
         serializable_session = {
@@ -660,7 +640,7 @@ class CarepayAgent:
     
     # Tool implementations
     
-    def store_user_data(self, input_str: str) -> str:
+    def store_user_data(self, input_str: str, session_id: str) -> str:
         """
         Store user data in the session
         
@@ -672,9 +652,8 @@ class CarepayAgent:
         """
         try:
             data = json.loads(input_str)
-            session_id = self._current_session_id
             
-            if not session_id or session_id not in self.sessions:
+            if not session_id:
                 return "Session ID not found or invalid"
             
             # Normalize field names for consistency
@@ -690,27 +669,32 @@ class CarepayAgent:
             if 'user_id' in data or 'userId' in data:
                 user_id = data.get('user_id') or data.get('userId')
                 # Also store in session data for completeness
-                self.sessions[session_id]["data"]["userId"] = user_id
+                session = self.get_session_from_db(session_id)
+                if session:
+                    session["data"]["userId"] = user_id
+                    self.update_session_in_db(session_id, session)
             
-                
             # Update session data
-            self.sessions[session_id]["data"].update(data)
-            logger.info(f"Session data updated: {self.sessions[session_id]['data']}")
-            
-            # Save updated session to database
-            self.save_session_to_db(session_id)
+            session = self.get_session_from_db(session_id)
+            if session:
+                session["data"].update(data)
+                logger.info(f"Session data updated: {session['data']}")
+                
+                # Save updated session to database
+                self.update_session_in_db(session_id, session)
             
             return f"Data successfully stored in session {session_id}"
         except Exception as e:
             logger.error(f"Error storing user data: {e}")
             return f"Error storing data: {str(e)}"
         
-    def get_user_id_from_phone_number(self, phone_number: str) -> str:
+    def get_user_id_from_phone_number(self, phone_number: str, session_id: str) -> str:
         """
         Get user ID from phone number
         
         Args:
             phone_number: User's phone number
+            session_id: Session identifier
             
         Returns:
             API response as JSON string with userId
@@ -720,26 +704,25 @@ class CarepayAgent:
             logger.info(f"API response from get_user_id_from_phone_number: {result}")
             
             # If successful, extract userId and store in session
-            if result.get("status") == 200 and hasattr(self, '_current_session_id'):
-                session_id = self._current_session_id
-                # print(f"Session ID: {session_id}") # Debug print, can be removed
-                if session_id in self.sessions:
+            if result.get("status") == 200 and session_id:
+                session = self.get_session_from_db(session_id)
+                if session:
                     # According to the problem description, result.get("data") is the userId string.
                     user_id_from_api = result.get("data")
                     
                     # Ensure extracted_user_id is a non-empty string
                     if isinstance(user_id_from_api, str) and user_id_from_api:
                         # Store userId in session.data.userId as per instruction
-                        self.sessions[session_id]["data"]["userId"] = user_id_from_api
+                        session["data"]["userId"] = user_id_from_api
                         logger.info(f"Stored userId '{user_id_from_api}' in session data for session {session_id}")
                         
                         # The original code also updated self.sessions[session_id]["user_id"].
                         # Maintaining this for consistency, assuming it might be used elsewhere.
-                        self.sessions[session_id]["user_id"] = user_id_from_api
-                        logger.info(f"Also updated user_id '{user_id_from_api}' at session root for session {session_id}")
+                        # session["user_id"] = user_id_from_api
+                        # logger.info(f"Also updated user_id '{user_id_from_api}' at session root for session {session_id}")
                         
                         # Save updated session to database
-                        self.save_session_to_db(session_id)
+                        self.update_session_in_db(session_id, session)
                     else:
                         logger.warning(
                             f"UserId not found or is not a string in API response's 'data' field. "
@@ -752,20 +735,21 @@ class CarepayAgent:
             logger.error(f"Error getting user ID from phone number: {e}")
             return f"Error getting user ID from phone number: {str(e)}"
     
-    def get_prefill_data(self, user_id: str = None) -> str:
+    def get_prefill_data(self, user_id: str = None, session_id: str = None) -> str:
         """
         Get prefilled user data
         
         Args:
             user_id: User identifier, optional if available in session
+            session_id: Session identifier
             
         Returns:
             Prefilled data as JSON string
         """
         try:
             # If user_id is not provided, try to get from session
-            if not user_id and hasattr(self, '_current_session_id'):
-                session = self.sessions.get(self._current_session_id)
+            if not user_id and session_id:
+                session = self.get_session_from_db(session_id)
                 if session and session.get("user_id"):
                     user_id = session.get("user_id")
                     
@@ -775,13 +759,17 @@ class CarepayAgent:
             result = self.api_client.get_prefill_data(user_id)
             
             # If successful, store important prefill data in session
-            if result.get("status") == 200 and hasattr(self, '_current_session_id'):
-                session_id = self._current_session_id
+            if result.get("status") == 200 and session_id:
                 try:
                     # Store the full API response for use by other methods like process_address_data
                     if "data" in result and "response" in result["data"]:
-                        self.sessions[session_id]["data"]["prefill_api_response"] = result["data"]["response"]
-                        logger.info(f"Stored full prefill API response in session for user ID: {user_id}")
+                        session = self.get_session_from_db(session_id)
+                        if session:
+                            session["data"]["prefill_api_response"] = result["data"]["response"]
+                            logger.info(f"Stored full prefill API response in session for user ID: {user_id}")
+                            
+                            # Save updated session to database
+                            self.update_session_in_db(session_id, session)
                     
                     response_data = result.get("data", {}).get("response", {})
                     prefill_data = {}
@@ -812,11 +800,13 @@ class CarepayAgent:
                     
                     # Store in session data
                     if prefill_data:
-                        self.sessions[session_id]["data"]["prefill_data"] = prefill_data
-                        logger.info(f"Stored prefill data in session: {prefill_data}")
-                        
-                        # Save updated session to database
-                        self.save_session_to_db(session_id)
+                        session = self.get_session_from_db(session_id)
+                        if session:
+                            session["data"]["prefill_data"] = prefill_data
+                            logger.info(f"Stored prefill data in session: {prefill_data}")
+                            
+                            # Save updated session to database
+                            self.update_session_in_db(session_id, session)
                 except Exception as e:
                     logger.warning(f"Error processing prefill data: {e}")
             
@@ -825,7 +815,7 @@ class CarepayAgent:
             logger.error(f"Error getting prefill data: {e}")
             return f"Error getting prefill data: {str(e)}"
         
-    def save_address_details(self, input_str: str) -> str:
+    def save_address_details(self, input_str: str, session_id: str) -> str:
         """
         Save address details
         
@@ -849,20 +839,21 @@ class CarepayAgent:
 
     
     
-    def get_employment_verification(self, user_id: str = None) -> str:
+    def get_employment_verification(self, user_id: str = None, session_id: str = None) -> str:
         """
         Get employment verification data
         
         Args:
             user_id: User identifier, optional if available in session
+            session_id: Session identifier
             
         Returns:
             Employment verification data as JSON string
         """
         try:
             # If user_id is not provided, try to get from session
-            if not user_id and hasattr(self, '_current_session_id'):
-                session = self.sessions.get(self._current_session_id)
+            if not user_id and session_id:
+                session = self.get_session_from_db(session_id)
                 if session and session.get("user_id"):
                     user_id = session.get("user_id")
                     
@@ -872,8 +863,7 @@ class CarepayAgent:
             result = self.api_client.get_employment_verification(user_id)
             
             # If successful, store important employment data in session
-            if result.get("status") == 200 and hasattr(self, '_current_session_id'):
-                session_id = self._current_session_id
+            if result.get("status") == 200 and session_id:
                 try:
                     data = result.get("data", {})
                     employment_data = {}
@@ -892,11 +882,13 @@ class CarepayAgent:
                     
                     # Store in session
                     if employment_data:
-                        self.sessions[session_id]["data"]["employment_data"] = employment_data
-                        logger.info(f"Stored employment data in session: {employment_data}")
-                        
-                        # Save updated session to database
-                        self.save_session_to_db(session_id)
+                        session = self.get_session_from_db(session_id)
+                        if session:
+                            session["data"]["employment_data"] = employment_data
+                            logger.info(f"Stored employment data in session: {employment_data}")
+                            
+                            # Save updated session to database
+                            self.update_session_in_db(session_id, session)
                 except Exception as e:
                     logger.warning(f"Error processing employment data: {e}")
             
@@ -905,12 +897,13 @@ class CarepayAgent:
             logger.error(f"Error getting employment verification: {e}")
             return f"Error getting employment verification: {str(e)}"
     
-    def save_basic_details(self, input_str: str) -> str:
+    def save_basic_details(self, input_str: str, session_id: str) -> str:
         """
         Save basic user details
         
         Args:
             input_str: JSON string with user details or user ID string
+            session_id: Session identifier
             
         Returns:
             Save result as JSON string
@@ -942,8 +935,8 @@ class CarepayAgent:
             # Ensure we have a valid user ID
             if not user_id:
                 # Try to get user ID from session if not provided in input
-                if hasattr(self, '_current_session_id'):
-                    session = self.sessions.get(self._current_session_id)
+                if session_id:
+                    session = self.get_session_from_db(session_id)
                     if session and session.get("user_id"):
                         user_id = session.get("user_id")
                 
@@ -955,12 +948,14 @@ class CarepayAgent:
         except Exception as e:
             logger.error(f"Error saving basic details: {e}")
             return f"Error saving basic details: {str(e)}"
-    def save_employment_details(self, input_str: str) -> str:
+        
+    def save_employment_details(self, input_str: str, session_id: str) -> str:
         """
         Save employment details
         
         Args:
             input_str: JSON string with employment data or user ID string
+            session_id: Session identifier
             
         Returns:
             Save result as JSON string
@@ -976,8 +971,8 @@ class CarepayAgent:
                 user_id = data.pop("userId", None) or data.pop("user_id", None)
             
             # Try to get user ID from session if not provided in input
-            if not user_id and hasattr(self, '_current_session_id'):
-                session = self.sessions.get(self._current_session_id)
+            if not user_id and session_id:
+                session = self.get_session_from_db(session_id)
                 if session and session.get("user_id"):
                     user_id = session.get("user_id")
             
@@ -992,8 +987,8 @@ class CarepayAgent:
                 data['monthlyFamilyIncome'] = data['monthlyIncome']
                 
             # Get monthly income from session data if not in the input
-            if ('netTakeHomeSalary' not in data or 'monthlyFamilyIncome' not in data) and hasattr(self, '_current_session_id'):
-                session = self.sessions.get(self._current_session_id)
+            if ('netTakeHomeSalary' not in data or 'monthlyFamilyIncome' not in data) and session_id:
+                session = self.get_session_from_db(session_id)
                 if session and 'data' in session:
                     session_data = session['data']
                     if 'monthlyIncome' in session_data:
@@ -1013,7 +1008,7 @@ class CarepayAgent:
             logger.error(f"Error saving employment details: {e}")
             return f"Error saving employment details: {str(e)}"
     
-    def save_loan_details(self, input_str: str) -> str:
+    def save_loan_details(self, input_str: str, session_id: str) -> str:
         """
         Save loan details
         
@@ -1033,8 +1028,8 @@ class CarepayAgent:
             doctor_id = None
             doctor_name = None
             
-            if hasattr(self, '_current_session_id'):
-                session = self.sessions.get(self._current_session_id)
+            if session_id:
+                session = self.get_session_from_db(session_id)
                 if session and "data" in session:
                     doctor_id = session["data"].get("doctor_id")
                     doctor_name = session["data"].get("doctor_name")
@@ -1049,20 +1044,21 @@ class CarepayAgent:
             logger.error(f"Error saving loan details: {e}")
             return f"Error saving loan details: {str(e)}"
     
-    def get_loan_details(self, user_id: str = None) -> str:
+    def get_loan_details(self, user_id: str = None, session_id: str = None) -> str:
         """
         Get loan details by user ID
         
         Args:
             user_id: User identifier, optional if available in session
+            session_id: Session identifier
             
         Returns:
             Loan details as JSON string
         """
         try:
             # If user_id is not provided, try to get from session
-            if not user_id and hasattr(self, '_current_session_id'):
-                session = self.sessions.get(self._current_session_id)
+            if not user_id and session_id:
+                session = self.get_session_from_db(session_id)
                 if session and session.get("user_id"):
                     user_id = session.get("user_id")
                     
@@ -1072,36 +1068,38 @@ class CarepayAgent:
             result = self.api_client.get_loan_details_by_user_id(user_id)
             
             # If successful, extract loanId and store in session for future use
-            if result.get("status") == 200 and hasattr(self, '_current_session_id'):
-                session_id = self._current_session_id
+            if result.get("status") == 200 and session_id:
                 data = result.get("data", {})
                 if isinstance(data, dict) and "loanId" in data:
                     loan_id = data["loanId"]
-                    self.sessions[session_id]["data"]["loanId"] = loan_id
-                    logger.info(f"Stored loanId {loan_id} in session {session_id}")
-                    
-                    # Save updated session to database
-                    self.save_session_to_db(session_id)
+                    session = self.get_session_from_db(session_id)
+                    if session:
+                        session["data"]["loanId"] = loan_id
+                        logger.info(f"Stored loanId {loan_id} in session {session_id}")
+                        
+                        # Save updated session to database
+                        self.update_session_in_db(session_id, session)
             
             return json.dumps(result)
         except Exception as e:
             logger.error(f"Error getting loan details: {e}")
             return f"Error getting loan details: {str(e)}"
     
-    def get_bureau_report(self, loan_id: str = None) -> str:
+    def get_bureau_report(self, loan_id: str = None, session_id: str = None) -> str:
         """
         Get bureau report for a loan
         
         Args:
             loan_id: Loan identifier, optional if available in session
+            session_id: Session identifier
             
         Returns:
             Bureau report status as JSON string
         """
         try:
             # If loan_id is not provided, try to get from session
-            if not loan_id and hasattr(self, '_current_session_id'):
-                session = self.sessions.get(self._current_session_id)
+            if not loan_id and session_id:
+                session = self.get_session_from_db(session_id)
                 if session and session.get("data", {}).get("loanId"):
                     loan_id = session["data"]["loanId"]
                     
@@ -1118,14 +1116,16 @@ class CarepayAgent:
             }
             
             # Store the full bureau report in the session for reference, but don't return it
-            if hasattr(self, '_current_session_id') and self._current_session_id in self.sessions:
-                self.sessions[self._current_session_id]["data"]["bureau_report_status"] = truncated_result
-                # Also store if we successfully retrieved the report (for use in later steps)
-                self.sessions[self._current_session_id]["data"]["bureau_report_retrieved"] = (result.get("status") == 200)
-                logger.info(f"Stored bureau report status in session for loan ID: {loan_id}")
-                
-                # Save updated session to database
-                self.save_session_to_db(self._current_session_id)
+            if session_id:
+                session = self.get_session_from_db(session_id)
+                if session:
+                    session["data"]["bureau_report_status"] = truncated_result
+                    # Also store if we successfully retrieved the report (for use in later steps)
+                    session["data"]["bureau_report_retrieved"] = (result.get("status") == 200)
+                    logger.info(f"Stored bureau report status in session for loan ID: {loan_id}")
+                    
+                    # Save updated session to database
+                    self.update_session_in_db(session_id, session)
             
             # Enhanced logging to ensure visibility
             logger.info(f"Bureau Report Response - Status: {result.get('status')}")
@@ -1150,7 +1150,7 @@ class CarepayAgent:
                 "message": f"Error getting bureau report: {str(e)}"
             })
     
-    def get_bureau_decision(self, input_str: str) -> str:
+    def get_bureau_decision(self, input_str: str, session_id: str) -> str:
         """
         Get bureau decision for a loan
         
@@ -1176,14 +1176,15 @@ class CarepayAgent:
                 regenerate_param = data.get("regenerate_param", 1) or data.get("regenerateParam", 1)
             
             # If loan_id is not provided, try to get from session
-            if not loan_id and hasattr(self, '_current_session_id'):
-                session = self.sessions.get(self._current_session_id)
+            if not loan_id and session_id:
+                session = self.get_session_from_db(session_id)
                 if session and "data" in session and "loanId" in session["data"]:
                     loan_id = session["data"]["loanId"]
             
+            
             # Get doctor_id from session if available
-            if hasattr(self, '_current_session_id'):
-                session = self.sessions.get(self._current_session_id)
+            if session_id:
+                session = self.get_session_from_db(session_id)
                 if session and "data" in session:
                     doctor_id = session["data"].get("doctor_id")
                     if doctor_id is None:
@@ -1210,8 +1211,8 @@ class CarepayAgent:
             treatment_cost = None
             show_detailed_approval = False
             
-            if hasattr(self, '_current_session_id'):
-                session = self.sessions.get(self._current_session_id)
+            if session_id:
+                session = self.get_session_from_db(session_id)
                 if session and "data" in session:
                     # Check for treatment cost in different possible field names
                     session_data = session["data"]
@@ -1248,18 +1249,18 @@ class CarepayAgent:
             
             # Process result to extract and format eligible EMI information
             if isinstance(result, dict) and result.get("status") == 200:
-                bureau_result = self.extract_bureau_decision_details(result)
+                bureau_result = self.extract_bureau_decision_details(result, session_id)
                 # Store the result in session for easy reference
-                if hasattr(self, '_current_session_id'):
-                    session_id = self._current_session_id
-                    if session_id in self.sessions:
-                        self.sessions[session_id]["data"]["bureau_decision_details"] = bureau_result
+                if session_id:
+                    session = self.get_session_from_db(session_id)
+                    if session:
+                        session["data"]["bureau_decision_details"] = bureau_result
                         # Also store the treatment cost logic result
-                        self.sessions[session_id]["data"]["show_detailed_approval"] = show_detailed_approval
+                        session["data"]["show_detailed_approval"] = show_detailed_approval
                         logger.info(f"Stored bureau decision details in session: {bureau_result}")
                         
                         # Save updated session to database
-                        self.save_session_to_db(session_id)
+                        self.update_session_in_db(session_id, session)
             
             return json.dumps(result)
         except Exception as e:
@@ -1269,7 +1270,7 @@ class CarepayAgent:
                 "error": f"Error getting bureau decision: {str(e)}"
             })
 
-    def extract_bureau_decision_details(self, bureau_result: Dict[str, Any]) -> Dict[str, Any]:
+    def extract_bureau_decision_details(self, bureau_result: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         """
         Extract and format eligible EMI details from a bureau decision result
         
@@ -1354,7 +1355,7 @@ class CarepayAgent:
                 "emiPlans": []
             }
 
-    def process_prefill_data_for_basic_details(self, input_data, user_id=None):
+    def process_prefill_data_for_basic_details(self, input_data, user_id=None, session_id=None):
         """
         Process prefill data and return a properly formatted JSON string for save_basic_details
         
@@ -1399,8 +1400,8 @@ class CarepayAgent:
                     prefill_data = input_data
                     
             # If user_id still not found, try to get it from session
-            if not user_id and hasattr(self, '_current_session_id'):
-                session = self.sessions.get(self._current_session_id)
+            if not user_id and session_id:
+                session = self.get_session_from_db(session_id)
                 if session:
                     # Try different places where userId might be stored
                     user_id = session.get("user_id")
@@ -1423,8 +1424,8 @@ class CarepayAgent:
             
             # Get session data to retrieve name and phone number if available
             session_data = {}
-            if hasattr(self, '_current_session_id'):
-                session = self.sessions.get(self._current_session_id)
+            if session_id:
+                session = self.get_session_from_db(session_id)
                 if session and "data" in session:
                     session_data = session["data"]
             
@@ -1516,7 +1517,7 @@ class CarepayAgent:
             else:
                 return json.dumps({"error": str(e)})
 
-    def process_address_data(self, input_str: str) -> str:
+    def process_address_data(self, input_str: str, session_id: str) -> str:
         """
         Extract address information from prefill data and save it using save_address_details.
         Looks for 'Primary' address type and extracts postal code (pincode) and address line.
@@ -1549,8 +1550,8 @@ class CarepayAgent:
             
             # Get prefill data from session if available
             prefill_data = None
-            if hasattr(self, '_current_session_id'):
-                session = self.sessions.get(self._current_session_id)
+            if session_id:
+                session = self.get_session_from_db(session_id)
                 if session and "data" in session:
                     session_data = session["data"]
                     # Check if the prefill API response is stored in the session
@@ -1571,10 +1572,11 @@ class CarepayAgent:
                     prefill_data = api_result["data"]["response"]
                     
                     # Store in session for future use
-                    if hasattr(self, '_current_session_id'):
-                        session_id = self._current_session_id
-                        if session_id in self.sessions:
-                            self.sessions[session_id]["data"]["prefill_api_response"] = prefill_data
+                    if session_id:
+                        session = self.get_session_from_db(session_id)
+                        if session:
+                            session["data"]["prefill_api_response"] = prefill_data
+                            self.update_session_in_db(session_id, session)
             
             if not prefill_data:
                 return json.dumps({"error": "No prefill data available to extract address"})
@@ -1629,7 +1631,8 @@ class CarepayAgent:
                 "userId": user_id if 'user_id' in locals() else None
             })
         
-    def pan_verification(self, input_str: str) -> str:
+        
+    def pan_verification(self, input_str: str, session_id: str) -> str:
         """
         Verify PAN details for a user
         
@@ -1654,8 +1657,8 @@ class CarepayAgent:
             
             if not user_id:
                 # Try to get user ID from session if not provided in input
-                if hasattr(self, '_current_session_id'):
-                    session = self.sessions.get(self._current_session_id)
+                if session_id:
+                    session = self.get_session_from_db(session_id)
                     if session and session.get("user_id"):
                         user_id = session.get("user_id")
                     elif session and session.get("data", {}).get("userId"):
@@ -1689,49 +1692,16 @@ class CarepayAgent:
             session_id: Session ID
         """
         try:
-            if session_id not in self.sessions:
+            # Get session from database instead of self.sessions
+            session = self.get_session_from_db(session_id)
+            if not session:
                 logger.error(f"Session {session_id} not found")
                 return
             
-            session = self.sessions[session_id]
+            # Update session in database using the existing method
+            self.update_session_in_db(session_id, session)
             
-            # Convert session_id to UUID if it's a string
-            if isinstance(session_id, str):
-                session_id = uuid.UUID(session_id)
-            
-            # Use pre-serialized history if available, otherwise convert
-            if 'serializable_history' in session:
-                serializable_history = session['serializable_history']
-            else:
-                serializable_history = []
-                if 'history' in session:
-                    for msg in session['history']:
-                        if hasattr(msg, 'content'):  # Check if it's a Message object (AIMessage or HumanMessage)
-                            msg_type = msg.__class__.__name__
-                            serializable_history.append({
-                                'type': msg_type,
-                                'content': msg.content
-                            })
-                        elif isinstance(msg, dict):
-                            serializable_history.append(msg)
-                        else:
-                            serializable_history.append(str(msg))
-                            
-                # Store the serialized history for future use
-                session['serializable_history'] = serializable_history
-            
-            # Save to database as JSON-serializable format
-            session_data, created = SessionData.objects.update_or_create(
-                session_id=session_id,
-                defaults={
-                    'data': session.get('data', {}),
-                    'history': serializable_history,  # Use the serialized history
-                    'status': session.get('status', 'active'),
-                    'phone_number': session.get('phone_number'),
-                }
-            )
-            
-            logger.info(f"Session {session_id} saved to database (created={created})")
+            logger.info(f"Session {session_id} saved to database")
         except Exception as e:
             logger.error(f"Error saving session to database: {e}")
             # Log more detailed information for debugging
@@ -1739,7 +1709,7 @@ class CarepayAgent:
                 history_types = [type(msg).__name__ for msg in session['history']]
                 logger.error(f"History contains types: {history_types}")
 
-    def save_additional_user_details(self, input_str: str) -> str:
+    def save_additional_user_details(self, input_str: str, session_id: str) -> str:
         """
         Save additional user details collected after bureau decision
         
@@ -1751,9 +1721,9 @@ class CarepayAgent:
         """
         try:
             data = json.loads(input_str)
-            session_id = self._current_session_id
             
-            if not session_id or session_id not in self.sessions:
+            session = self.get_session_from_db(session_id)
+            if not session:
                 return "Session ID not found or invalid"
             
             # Extract additional details
@@ -1766,8 +1736,8 @@ class CarepayAgent:
             workplace_pincode = data.get('workplacePincode', '')
             
             # Create additional_details field if it doesn't exist
-            if 'additional_details' not in self.sessions[session_id]["data"]:
-                self.sessions[session_id]["data"]["additional_details"] = {}
+            if 'additional_details' not in session["data"]:
+                session["data"]["additional_details"] = {}
             
             # Update additional details
             additional_details = {
@@ -1785,15 +1755,15 @@ class CarepayAgent:
                 additional_details["business_name"] = business_name
                 
             # Update session data
-            self.sessions[session_id]["data"]["additional_details"].update(additional_details)
+            session["data"]["additional_details"].update(additional_details)
             
             # Save updated session to database
-            self.save_session_to_db(session_id)
+            self.update_session_in_db(session_id, session)
             
             # Try to get user ID from session
-            user_id = self.sessions[session_id]["data"].get("userId")
-            # doctor_id = self.sessions[session_id]["data"].get("doctorId")
-            # doctor_name = self.sessions[session_id]["data"].get("doctorName")
+            user_id = session["data"].get("userId")
+            # doctor_id = session["data"].get("doctorId")
+            # doctor_name = session["data"].get("doctorName")
             # print(f"User ID: {user_id}")
             
             # If we have a user ID, send employment details to API
@@ -1847,7 +1817,10 @@ class CarepayAgent:
             AI response message
         """
         try:
-            session = self.sessions[session_id]
+            session = self.get_session_from_db(session_id)
+            if not session:
+                logger.error(f"Session {session_id} not found")
+                return "Session not found. Please start a new conversation."
             
             # Ensure additional_details exists in session data
             if "additional_details" not in session["data"]:
@@ -1862,15 +1835,19 @@ class CarepayAgent:
             # Log current step for debugging
             logger.info(f"Session {session_id}: Processing step '{collection_step}' with message: {message.strip()}")
             
-            # Function to save the current collection step
+            # Function to save the current collection step and refresh session
             def update_collection_step(new_step):
-                session["data"]["collection_step"] = new_step
-                # Make sure to update the in-memory session immediately
-                self.sessions[session_id]["data"]["collection_step"] = new_step
-                # Also ensure the status is properly set
-                self.sessions[session_id]["status"] = "collecting_additional_details"
-                logger.info(f"Session {session_id}: Updated collection step to '{new_step}'")
-                self.save_session_to_db(session_id)
+                # Get fresh session data
+                current_session = self.get_session_from_db(session_id)
+                if current_session:
+                    current_session["data"]["collection_step"] = new_step
+                    # Also ensure the status is properly set
+                    current_session["status"] = "collecting_additional_details"
+                    logger.info(f"Session {session_id}: Updated collection step to '{new_step}'")
+                    self.update_session_in_db(session_id, current_session)
+                    # Update the local session variable to reflect changes
+                    nonlocal session
+                    session = current_session
             
             # Handle employment type input (first step)
             if collection_step == "employment_type":
@@ -1885,8 +1862,6 @@ class CarepayAgent:
                 
                 # Update session data with employment type
                 session["data"]["additional_details"] = additional_details
-                # Also update in-memory session
-                self.sessions[session_id]["data"]["additional_details"] = additional_details
                 
                 # Update collection step and ask for marital status
                 update_collection_step("marital_status")
@@ -1910,8 +1885,6 @@ please Enter input 1 or 2 only"""
                 
                 # Update session data with marital status
                 session["data"]["additional_details"] = additional_details
-                # Also update in-memory session
-                self.sessions[session_id]["data"]["additional_details"] = additional_details
                 
                 # Update collection step and ask for education qualification
                 update_collection_step("education_qualification")
@@ -1947,8 +1920,6 @@ Please Enter input between 1 to 7 only"""
                 
                 # Update session data with education qualification
                 session["data"]["additional_details"] = additional_details
-                # Also update in-memory session
-                self.sessions[session_id]["data"]["additional_details"] = additional_details
                 
                 # Update collection step and ask for treatment reason
                 update_collection_step("treatment_reason")
@@ -1962,8 +1933,6 @@ What is the name of treatment?"""
                 
                 # Update session data with treatment reason
                 session["data"]["additional_details"] = additional_details
-                # Also update in-memory session
-                self.sessions[session_id]["data"]["additional_details"] = additional_details
                 
                 # Update collection step and ask organization/business name based on employment type
                 if additional_details.get("employment_type") == "SALARIED":
@@ -1983,8 +1952,6 @@ What is the Business Name of the patient?"""
                 
                 # Update session data
                 session["data"]["additional_details"] = additional_details
-                # Also update in-memory session
-                self.sessions[session_id]["data"]["additional_details"] = additional_details
                 
                 # Update collection step to ask for workplace pincode
                 update_collection_step("workplace_pincode")
@@ -1999,8 +1966,6 @@ Please enter 6 digits:"""
                 
                 # Update session data
                 session["data"]["additional_details"] = additional_details
-                # Also update in-memory session
-                self.sessions[session_id]["data"]["additional_details"] = additional_details
                 
                 # Update collection step to ask for workplace pincode
                 update_collection_step("workplace_pincode")
@@ -2020,8 +1985,6 @@ Please enter 6 digits:"""
                 
                 # Update session data
                 session["data"]["additional_details"] = additional_details
-                # Also update in-memory session
-                self.sessions[session_id]["data"]["additional_details"] = additional_details
                 
                 # Mark collection as complete
                 update_collection_step("complete")
@@ -2029,7 +1992,7 @@ Please enter 6 digits:"""
                 # Save all collected details using the tool
                 # Make sure to create a new copy to avoid reference issues
                 details_to_save = dict(additional_details)
-                result = self.save_additional_user_details(json.dumps(details_to_save))
+                result = self.save_additional_user_details(json.dumps(details_to_save), session_id)
                 
                 # Change session status to completed but keep session active
                 session["status"] = "additional_details_completed"
@@ -2037,7 +2000,7 @@ Please enter 6 digits:"""
                 
                 # Get profile link to show to the user
                 profile_link = self._get_profile_link(session_id)
-                self.save_session_to_db(session_id)
+                self.update_session_in_db(session_id, session)
                 
                 return f"""Workplace pincode noted: {pincode}
 
@@ -2070,7 +2033,11 @@ You can track your application progress and next step of process"""
             Profile completion link URL
         """  
         try:
-            session = self.sessions[session_id]
+            session = self.get_session_from_db(session_id)
+            if not session:
+                logger.error(f"Session {session_id} not found")
+                fallback_url = "https://carepay.money/patient/Gurgaon/Nikhil_Dental_Clinic/Nikhil_Salkar/e71779851b144d1d9a25a538a03612fc/"
+                return Helper.clean_url(fallback_url)
             
             # Get doctor ID from session
             doctor_id = session["data"].get("doctorId") or session["data"].get("doctor_id")
@@ -2118,7 +2085,11 @@ You can track your application progress and next step of process"""
             Employment data dict ready for API
         """
         try:
-            session = self.sessions[session_id]
+            session = self.get_session_from_db(session_id)
+            if not session:
+                logger.error(f"Session {session_id} not found")
+                return {}
+                
             additional_details = session["data"].get("additional_details", {})
             
             # Create employment data structure
@@ -2164,7 +2135,12 @@ You can track your application progress and next step of process"""
             Loan data dict ready for API
         """
         try:
-            session = self.sessions[session_id]
+            # Get session from database instead of self.sessions
+            session = self.get_session_from_db(session_id)
+            if not session:
+                logger.error(f"Session {session_id} not found")
+                return {}
+                
             additional_details = session["data"].get("additional_details", {})
             user_id = session["data"].get("userId") or session["data"].get("user_id")
             session_data = session["data"]
@@ -2218,7 +2194,11 @@ You can track your application progress and next step of process"""
             Basic details dict ready for API
         """
         try:
-            session = self.sessions[session_id]
+            session = self.get_session_from_db(session_id)
+            if not session:
+                logger.error(f"Session {session_id} not found")
+                return {}
+                
             additional_details = session["data"].get("additional_details", {})  
             user_id = session["data"].get("userId") or session["data"].get("user_id")
          
@@ -2263,3 +2243,98 @@ You can track your application progress and next step of process"""
         except Exception as e:
             logger.error(f"Error processing basic details from additional details: {e}")
             return {}
+
+    def _create_session_aware_tools(self, session_id: str):
+        """
+        Create tools that are aware of the current session_id
+        
+        Args:
+            session_id: Current session identifier
+            
+        Returns:
+            List of tools with session_id bound
+        """
+        return [
+            Tool(
+                name="get_user_id_from_phone_number",
+                func=lambda phone_number: self.get_user_id_from_phone_number(phone_number, session_id),
+                description="Get userId from response of API call get_user_id_from_phone_number",
+            ),
+            Tool(
+                name="save_basic_details",
+                func=lambda input_str: self.save_basic_details(input_str, session_id),
+                description="Save user's basic personal details. Must pass either a user ID as a string or a JSON object with userId and other fields like panCard, gender, dateOfBirth, etc.",
+            ),
+            Tool(
+                name="get_prefill_data",
+                func=lambda user_id=None: self.get_prefill_data(user_id, session_id),
+                description="Get prefilled user data from user ID",
+            ),
+             Tool(
+                name="process_prefill_data",
+                func=lambda input_data, user_id=None: self.process_prefill_data_for_basic_details(input_data, user_id, session_id),
+                description="Convert prefill data from get_prefill_data to a properly formatted JSON for save_basic_details. MUST include both prefill_data and user_id parameters.",
+            ),
+            Tool(
+                name="process_address_data",
+                func=lambda input_str: self.process_address_data(input_str, session_id),
+                description="Extract address information from prefill data and save it using save_address_details. Call this after process_prefill_data. Must include userId parameter.",
+            ),
+            Tool(
+                name="save_address_details",
+                func=lambda input_str: self.save_address_details(input_str, session_id),
+                description="Save address details for a user. Requires userId and address object.",
+            ),
+            Tool(
+                name="pan_verification",
+                func=lambda input_str: self.pan_verification(input_str, session_id),
+                description="Verify PAN details for a user",
+            ),
+            Tool(
+                name="get_employment_verification",
+                func=lambda user_id=None: self.get_employment_verification(user_id, session_id),
+                description="Get employment verification data for a user ID",
+            ),
+           
+            Tool(
+                name="save_employment_details",
+                func=lambda input_str: self.save_employment_details(input_str, session_id),
+                description="Save user's employment details",
+            ),
+            Tool(
+                name="save_loan_details",
+                func=lambda input_str: self.save_loan_details(input_str, session_id),
+                description="Save loan details for the user",
+            ),
+            Tool(
+                name="get_loan_details",
+                func=lambda user_id=None: self.get_loan_details(user_id, session_id),
+                description="Get loan details for a user",
+            ),
+            Tool(
+                name="get_bureau_report",
+                func=lambda loan_id=None: self.get_bureau_report(loan_id, session_id),
+                description="Get bureau report for a loan",
+            ),
+            Tool(
+                name="get_bureau_decision",
+                func=lambda input_str: self.get_bureau_decision(input_str, session_id),
+                description="Get bureau decision for loan application and input is loanId and doctorId that come from get_loan_details",
+            ),
+            Tool(
+                name="get_session_data",
+                func=lambda: self.get_session_data(session_id),
+                description="Get current session data",
+            ),
+            Tool(
+                name="store_user_data",
+                func=lambda input_str: self.store_user_data(input_str, session_id),
+                description="Store user data in session",
+            ),
+            Tool(
+                name="get_profile_link",
+                func=lambda: self._get_profile_link(session_id),
+                description="Get profile link for a user",
+            ),
+        ]
+
