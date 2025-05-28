@@ -81,7 +81,14 @@ class CarepayAgent:
            - Use save_basic_details tool to submit these details along with the userId
            - IMPORTANT: When calling save_basic_details, format the data as a proper JSON object with the userId field included
 
-        4. Data Prefill:
+        4. Save Loan Details:
+           - didn't miss this step
+           - Use save_loan_details tool to submit:
+              * User's full name (from initial data collection)
+              * Treatment cost (from initial data collection)
+              * User ID
+
+        5. Data Prefill:
            - didn't miss this step
            - if get_prefill_data will show status 200 then continue complete below steps
            - Use get_prefill_data tool to retrieve user details using the userId and renmber this userID  that will use in process_prefill_data_for_basic_details
@@ -90,7 +97,7 @@ class CarepayAgent:
            - Use the process_prefill_data_for_basic_details tool to formate process_prefill_data for save_basic_details in process_prefill_data_for_basic_details there i calling save_basic_details with userId and prefill data as input  and also give userId in process_prefill_data_for_basic_details
            - only if get_prefill_data will show status 500, 404 then must return continue you jounry with below provided link here  must call get_profile_link tool this take input session_id to get profile link and return that link I encountered an issue while processing the loan. However, you can continue your journey given link here
 
-        5. Address Processing:
+        6. Address Processing:
            - didn't miss this step
            - After processing the prefill data, use the process_address_data tool to extract and save the user's address
            - Pass the userId to the tool to ensure it can retrieve the prefill data and extract the address information
@@ -98,26 +105,19 @@ class CarepayAgent:
            - The tool will automatically call save_address_details with the extracted information
            - Use pan_verification tool using userId to verify pan number here just check the response status if 200 continue the remain steps
 
-        6. Employment Verification:
+        7. Employment Verification:
            - didn't miss this step
            - Use get_employment_verification tool to check employment status using userId
            - Determine if user is SALARIED or SELF-EMPLOYED based on the response if found then save emploment_Details with userId and employment_Details accordingly
            - If employment data is not found, message: no records found then go with SALARIED
 
-        7. Save Employment Details:
+        8. Save Employment Details:
            - didn't miss this step
            - Use save_employment_details tool to submit:
               * Employment type (SALARIED or SELF-EMPLOYED)
               * Monthly income (from initial data collection)
               * Organization name (if available from verification) other wise pass empty string
            - IMPORTANT: Format the data as a proper JSON with the userId and required fields
-
-        8. Save Loan Details:
-           - didn't miss this step
-           - Use save_loan_details tool to submit:
-              * User's full name (from initial data collection)
-              * Treatment cost (from initial data collection)
-              * User ID
 
         9. Process Loan Application:
            - didn't miss this step
@@ -2329,10 +2329,16 @@ You can track your application progress and next step of process"""
                 description="Save user's basic personal details. Must pass either a user ID as a string or a JSON object with userId and other fields like panCard, gender, dateOfBirth, etc.",
             ),
             Tool(
+                name="save_loan_details",
+                func=lambda input_str: self.save_loan_details(input_str, session_id),
+                description="Save user's loan details. Must pass either a user ID as a string or a JSON object with userId and other fields like fullName, treatmentCost, etc.",
+            ),
+            Tool(
                 name="get_prefill_data",
                 func=lambda user_id=None: self.get_prefill_data(user_id, session_id),
                 description="Get prefilled user data from user ID",
             ),
+            
              Tool(
                 name="process_prefill_data",
                 func=lambda input_data, user_id=None: self.process_prefill_data_for_basic_details(input_data, user_id, session_id),
@@ -2364,11 +2370,7 @@ You can track your application progress and next step of process"""
                 func=lambda input_str: self.save_employment_details(input_str, session_id),
                 description="Save user's employment details",
             ),
-            Tool(
-                name="save_loan_details",
-                func=lambda input_str: self.save_loan_details(input_str, session_id),
-                description="Save loan details for the user",
-            ),
+            
             Tool(
                 name="get_loan_details",
                 func=lambda user_id=None: self.get_loan_details(user_id, session_id),
