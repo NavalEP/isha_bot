@@ -56,6 +56,8 @@ class CarepayAgent:
         self.system_prompt = """
         You are a healthcare loan application assistant for CarePay. Your role is to help users apply for loans for medical treatments in a professional and friendly manner.
 
+        IMPORTANT: You must complete ALL steps sequentially in one conversation turn. Do not stop after any individual step - continue through the entire process until you reach step 10.
+
         Follow these steps sequentially to process a loan application: and don't miss any step and any tool calling
 
         1. Initial Data Collection:
@@ -67,6 +69,7 @@ class CarepayAgent:
               * Monthly income(must be positive number other wise return error message and ask to enter valid monthly income)
               if these four details not collect from user message then ask ther remaining ones
            - Use the store_user_data tool to save this information in the session
+           - IMMEDIATELY proceed to step 2 after completion
 
         2. User ID Creation:
            - didn't miss this step
@@ -74,12 +77,14 @@ class CarepayAgent:
            - if get_user_id_from_phone_number will show status 500 then return message like ask to enter valid phone number
            - Extract the userId from the response and store it in the session
            - Use this userId for all subsequent API calls
+           - IMMEDIATELY proceed to step 3 after completion
 
         3. Basic Details Submission:
            - didn't miss this step
            - Retrieve name and phone number from session data
            - Use save_basic_details tool to submit these details along with the userId
            - IMPORTANT: When calling save_basic_details, format the data as a proper JSON object with the userId field included
+           - IMMEDIATELY proceed to step 4 after completion
 
         4. Save Loan Details:
            - didn't miss this step
@@ -87,6 +92,7 @@ class CarepayAgent:
               * User's full name (from initial data collection)
               * Treatment cost (from initial data collection)
               * User ID
+           - IMMEDIATELY proceed to step 5 after completion
 
         5. Data Prefill:
            - didn't miss this step
@@ -96,6 +102,7 @@ class CarepayAgent:
            - didn't forget the userId what give to process_prefill_data_for_basic_details
            - Use the process_prefill_data_for_basic_details tool to formate process_prefill_data for save_basic_details in process_prefill_data_for_basic_details there i calling save_basic_details with userId and prefill data as input  and also give userId in process_prefill_data_for_basic_details
            - only if get_prefill_data will show status 500, 404 then must return continue you jounry with below provided link here  must call get_profile_link tool this take input session_id to get profile link and return that link I encountered an issue while processing the loan. However, you can continue your journey given link here
+           - IMMEDIATELY proceed to step 6 after completion
 
         6. Address Processing:
            - didn't miss this step
@@ -104,12 +111,14 @@ class CarepayAgent:
            - This tool will extract the address line, pincode (postal code), and state from the primary/permanent address in the prefill data
            - The tool will automatically call save_address_details with the extracted information
            - Use pan_verification tool using userId to verify pan number here just check the response status if 200 continue the remain steps
+           - IMMEDIATELY proceed to step 7 after completion
 
         7. Employment Verification:
            - didn't miss this step
            - Use get_employment_verification tool to check employment status using userId
            - Determine if user is SALARIED or SELF-EMPLOYED based on the response if found then save emploment_Details with userId and employment_Details accordingly
            - If employment data is not found, message: no records found then go with SALARIED
+           - IMMEDIATELY proceed to step 8 after completion
 
         8. Save Employment Details:
            - didn't miss this step
@@ -118,13 +127,14 @@ class CarepayAgent:
               * Monthly income (from initial data collection)
               * Organization name (if available from verification) other wise pass empty string
            - IMPORTANT: Format the data as a proper JSON with the userId and required fields
+           - IMMEDIATELY proceed to step 9 after completion
 
         9. Process Loan Application:
            - didn't miss this step
            - Use get_loan_details tool to retrieve loanId using userId
            - Use get_bureau_report tool to check if the bureau report API call is successful (this tool only returns API status, not the full report) that using by loanId( for API call) and didn't forget the hit this tool APU call
-
            - Use get_bureau_decision tool to get final loan decision using loanId and doctorId
+           - IMMEDIATELY proceed to step 10 after completion
 
         10. Decision Communication and Additional Information Collection:
            - didn't miss this step
@@ -197,6 +207,8 @@ class CarepayAgent:
            - IMPORTANT: Extract credit limit from bureau decision response data (look for creditLimit, maxEligibleEMI, or similar fields).
            - IMPORTANT: Extract down payment information from emiPlans in the bureau decision response if available.
            - IMPORTANT: Use show_detailed_approval flag from bureau decision response to determine whether to show detailed financial information
+
+        CRITICAL: You must execute ALL 10 steps in sequence without stopping. Each step should flow directly into the next step until you complete the entire loan application process and provide the final decision to the user.
 
         Always maintain a professional, helpful tone throughout the conversation.
         """
@@ -2064,14 +2076,105 @@ Please enter 6 digits:"""
                 
                 # Get profile link to show to the user
                 profile_link = self._get_profile_link(session_id)
+
+                # Check if doctor is mapped by FIBE
+                doctor_id = session["data"].get("doctorId") or session["data"].get("doctor_id")
+                logger.info(f"Session {session_id}: Doctor ID: {doctor_id}")
+                fibe_link_to_display = None  # Initialize a variable to hold the Fibe link if applicable
+                
+                if doctor_id:
+                    try:
+                        # Check if the method exists before calling it
+                        if hasattr(self.api_client, 'check_doctor_mapped_by_nbfc'):
+                            check_doctor_mapped_by_nbfc_response = self.api_client.check_doctor_mapped_by_nbfc(doctor_id)
+                            logger.info(f"Session {session_id}: Check doctor mapped by FIBE response for doctor_id {doctor_id}: {json.dumps(check_doctor_mapped_by_nbfc_response)}")
+
+                            # Handle both status 200 and non-500 statuses that indicate success
+                            if check_doctor_mapped_by_nbfc_response.get("status") == 200:
+                                doctor_mapped_by_nbfc = check_doctor_mapped_by_nbfc_response.get("data")
+                                if doctor_mapped_by_nbfc == "true":
+                                    logger.info(f"Session {session_id}: Doctor {doctor_id} is mapped by FIBE. Proceeding to FIBE flow check.")
+                                    
+                                    # Doctor is mapped, now check FIBE flow
+                                    user_id = session["data"].get("userId")
+                                    if user_id:
+                                        try:
+                                            # Call check_fibe_flow API
+                                            check_fibe_response = self.api_client.check_fibe_flow(user_id)
+                                            logger.info(f"Session {session_id}: Fibe flow check response for user_id {user_id}: {json.dumps(check_fibe_response)}")
+
+                                            # Store the API response in session data
+                                            self.update_session_data_field(session_id, "data.api_responses.check_fibe_flow", check_fibe_response)
+
+                                            # Process based on check_fibe_flow response
+                                            if check_fibe_response.get("status") == 200:
+                                                fibe_status_data = check_fibe_response.get("data")
+                                                if fibe_status_data == "GREEN":
+                                                    logger.info(f"Session {session_id}: Fibe flow is GREEN for user_id {user_id}. Proceeding to profile ingestion.")
+                                                    
+                                                    # Call profile_ingestion_for_fibe API
+                                                    profile_ingestion_response = self.api_client.profile_ingestion_for_fibe(user_id)
+                                                    logger.info(f"Session {session_id}: Fibe profile ingestion response for user_id {user_id}: {json.dumps(profile_ingestion_response) if profile_ingestion_response else 'None'}")
+                                                    
+                                                    # Store the API response in session data
+                                                    self.update_session_data_field(session_id, "data.api_responses.profile_ingestion_for_fibe", profile_ingestion_response)
+
+                                                    # Check if we got a valid response
+                                                    if profile_ingestion_response and isinstance(profile_ingestion_response, dict):
+                                                        response_status = profile_ingestion_response.get("status")
+                                                        if response_status == 200:
+                                                            ingestion_data = profile_ingestion_response.get("data")
+                                                            if ingestion_data and isinstance(ingestion_data, dict) and ingestion_data.get("leadStatus") == "APPROVED":
+                                                                fibe_link_to_display = ingestion_data.get("bitlyUrl")
+                                                                if fibe_link_to_display:
+                                                                    logger.info(f"Session {session_id}: Fibe lead status APPROVED for user_id {user_id}. Bitly URL: {fibe_link_to_display}")
+                                                                else:
+                                                                    logger.warning(f"Session {session_id}: Fibe lead status APPROVED for user_id {user_id} but no bitlyUrl found in response: {ingestion_data}")
+                                                            else:
+                                                                lead_status = ingestion_data.get('leadStatus') if isinstance(ingestion_data, dict) else "N/A"
+                                                                logger.info(f"Session {session_id}: Fibe profile ingestion for user_id {user_id} did not result in APPROVED leadStatus. Status: {lead_status}")
+                                                        else:
+                                                            logger.error(f"Session {session_id}: Fibe profile ingestion API call failed for user_id {user_id}. Status: {response_status}")
+                                                    else:
+                                                        logger.error(f"Session {session_id}: Fibe profile ingestion API call returned invalid response for user_id {user_id}. Response: {profile_ingestion_response}")
+                                                
+                                                elif fibe_status_data == "AMBER":
+                                                    logger.info(f"Session {session_id}: Fibe flow is AMBER (IN_PROGRESS) for user_id {user_id}.")
+                                                elif fibe_status_data == "RED":
+                                                    logger.info(f"Session {session_id}: Fibe flow is RED (REJECTED) for user_id {user_id}.")
+                                                else:
+                                                    logger.warning(f"Session {session_id}: Fibe flow check for user_id {user_id} returned an unexpected data value: {fibe_status_data}")
+                                            else:
+                                                logger.warning(f"Session {session_id}: Fibe flow check API call failed or returned non-200 status for user_id {user_id}")
+                                        
+                                        except Exception as e:
+                                            logger.error(f"Session {session_id}: Exception during Fibe flow processing for user_id {user_id}: {e}", exc_info=True)
+                                    else:
+                                        logger.warning(f"Session {session_id}: 'userId' not found in session data. Skipping Fibe flow.")
+                                else:
+                                    logger.info(f"Session {session_id}: Doctor {doctor_id} is not mapped by FIBE (status: {doctor_mapped_by_nbfc}). Skipping Fibe flow.")
+                            elif check_doctor_mapped_by_nbfc_response.get("status") == 500:
+                                logger.warning(f"Session {session_id}: Check doctor mapped by FIBE API returned status 500 for doctor_id {doctor_id}. Falling back to profile link.")
+                            else:
+                                logger.warning(f"Session {session_id}: Check doctor mapped by FIBE API call failed for doctor_id {doctor_id}. Status: {check_doctor_mapped_by_nbfc_response.get('status')}")
+                        else:
+                            logger.warning(f"Session {session_id}: check_doctor_mapped_by_nbfc method not available in API client. Falling back to profile link.")
+                    except Exception as e:
+                        logger.error(f"Session {session_id}: Exception during doctor mapping check for doctor_id {doctor_id}: {e}", exc_info=True)
+                else:
+                    logger.warning(f"Session {session_id}: Doctor ID not found in session data. Skipping FIBE flow.")
+
+                # Determine which link to return - always fallback to profile_link if fibe_link_to_display is None
+                link_to_display = fibe_link_to_display if fibe_link_to_display else profile_link
+                
                 
                 return f"""Workplace pincode noted: {pincode}
 
-Thank you! Your application is now complete. Please check your application status by visiting the following link:
+Thank you! Your application is now complete. Please check your application status by visiting the following:
+{link_to_display}
+You can track your application progress and next step of process
 
-{profile_link}
-
-You can track your application progress and next step of process"""
+"""
             
             # If collection is complete, give a final message
             elif collection_step == "complete":
