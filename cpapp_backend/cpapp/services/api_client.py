@@ -38,29 +38,75 @@ class CarepayAPIClient:
             url = f"{self.base_url}/{endpoint}"
             logger.info(f"Making {method} request to {url}")
             
+            # Log request details for debugging
+            if params:
+                logger.debug(f"Request params: {params}")
+            if data:
+                logger.debug(f"Request data: {data}")
+            if headers:
+                logger.debug(f"Request headers: {headers}")
+            
+            response = None
             if method.upper() == "GET":
-                response = requests.get(url, params=params, headers=headers)
+                response = requests.get(url, params=params, headers=headers, timeout=30)
             elif method.upper() == "POST":
-                response = requests.post(url, json=data, headers=headers)
+                response = requests.post(url, params=params, json=data, headers=headers, timeout=30)
             else:
-                return {"status": 400, "error": f"Unsupported method: {method}"}
+                error_msg = f"Unsupported method: {method}"
+                logger.error(error_msg)
+                return {"status": 400, "error": error_msg}
             
             logger.info(f"Response status: {response.status_code}")
-            logger.info(f"Response body: {response.text[:500]}")
+            logger.debug(f"Response headers: {dict(response.headers)}")
             
+            # Log response body (truncated for readability)
+            response_text = response.text
+            if len(response_text) > 1000:
+                logger.info(f"Response body (truncated): {response_text[:1000]}...")
+            else:
+                logger.info(f"Response body: {response_text}")
+            
+            # Handle HTTP error status codes
             if response.status_code >= 400:
-                return {"status": response.status_code, "error": response.text}
+                error_response = {
+                    "status": response.status_code, 
+                    "error": response_text,
+                    "url": url,
+                    "method": method
+                }
+                logger.error(f"HTTP error {response.status_code}: {response_text}")
+                return error_response
             
+            # Try to parse JSON response
             try:
-                return response.json()
+                json_response = response.json()
+                logger.debug(f"Successfully parsed JSON response")
+                return json_response
             except json.JSONDecodeError as e:
                 logger.warning(f"Could not parse JSON response: {e}")
-                return {"status": 200, "data": response.text}
+                logger.warning(f"Raw response: {response_text}")
+                return {
+                    "status": 200, 
+                    "data": response_text,
+                    "warning": "Response was not valid JSON"
+                }
             
+        except requests.exceptions.Timeout as e:
+            error_msg = f"API request timeout after 30 seconds: {str(e)}"
+            logger.error(error_msg)
+            return {"status": 408, "error": error_msg, "url": url, "method": method}
+        except requests.exceptions.ConnectionError as e:
+            error_msg = f"API connection error: {str(e)}"
+            logger.error(error_msg)
+            return {"status": 503, "error": error_msg, "url": url, "method": method}
         except requests.exceptions.RequestException as e:
             error_msg = f"API request failed: {str(e)}"
             logger.error(error_msg)
-            return {"status": 500, "error": error_msg}
+            return {"status": 500, "error": error_msg, "url": url, "method": method}
+        except Exception as e:
+            error_msg = f"Unexpected error during API request: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {"status": 500, "error": error_msg, "url": url, "method": method}
         
     def send_otp(self, phone_number: str) -> Dict[str, Any]:
         """
@@ -376,3 +422,58 @@ class CarepayAPIClient:
         """
         endpoint = "panVerify"
         return self._make_request('GET', endpoint, params={"userId": user_id})
+    
+    def profile_ingestion_for_fibe(self, user_id: str) -> Dict[str, Any]:
+        """
+        Shares borrower data with the lender 'FIBE'.
+        Corresponds to API: profileIngestionForFibe
+
+        Args:
+            user_id: The ID of the user.
+
+        Returns:
+            API response.
+        """
+        endpoint = "profileIngestionForFibe"
+        params = {
+            "userId": user_id,
+            "type": "customer"
+        }
+        data = {}  # Empty body for POST request
+        logger.info(f"Initiating profile ingestion for Fibe for userId: {user_id} with type: customer")
+        return self._make_request('POST', endpoint, params=params, data=data)
+
+    def check_fibe_flow(self, user_id: str) -> Dict[str, Any]:
+        """
+        Checks the decision provided by the lender 'Fibe'.
+        Corresponds to API: checkFibeFlow
+
+        Args:
+            user_id: The ID of the user.
+
+        Returns:
+            API response.
+        """
+        endpoint = "checkFibeFlow"
+        params = {"userId": user_id}
+        logger.info(f"Checking Fibe flow for userId: {user_id}")
+        return self._make_request('GET', endpoint, params=params)
+
+    def check_doctor_mapped_by_nbfc(self, doctor_id: str) -> Dict[str, Any]:
+        """
+        Checks if a doctor is mapped by the NBFC 'FIBE'.
+        Corresponds to API: checkDoctorMappedByNbfc
+
+        Args:
+            doctor_id: The ID of the doctor.
+
+        Returns:
+            API response.
+        """
+        endpoint = "checkDoctorMappedByNbfc"
+        params = {
+            "doctorId": doctor_id,
+            "nbfc": "FIBE"  # NBFC is always FIBE as per new requirement
+        }
+        logger.info(f"Checking if doctor {doctor_id} is mapped by NBFC FIBE")
+        return self._make_request('GET', endpoint, params=params)
