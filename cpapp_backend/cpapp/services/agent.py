@@ -93,6 +93,19 @@ class CarepayAgent:
               * Treatment cost (from initial data collection)
               * User ID
            - IMMEDIATELY proceed to step 5 after completion
+           - check for cardless loan then call check_jp_cardless tool that input session_id and if status is 200 then return profile link and show laon Application decision Approved and profile link with you are eligible for Juspay Cardless 
+           - if the loan application is approved here then didn't do below steps 5,6,7,8,9,10
+            and show this message 
+            ```
+            🎉 Congratulations, [PATIENT_NAME]! Your loan application has been **APPROVED**.
+            ```
+            and Continue your journey with the link here
+            ```
+            [PROFILE_LINK]
+            ```
+          - if tell not eligible for cardless loan then continue with below steps 5,6,7,8,9,10
+            
+            
 
         5. Data Prefill:
            - didn't miss this step
@@ -2434,6 +2447,11 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                 description="Save user's loan details. Must pass either a user ID as a string or a JSON object with userId and other fields like fullName, treatmentCost, etc.",
             ),
             Tool(
+                name="check_jp_cardless",
+                func=lambda session_id_input: self.check_jp_cardless(session_id),
+                description="Check eligibility for Juspay Cardless",
+            ),
+            Tool(
                 name="get_prefill_data",
                 func=lambda user_id=None: self.get_prefill_data(user_id, session_id),
                 description="Get prefilled user data from user ID",
@@ -2498,7 +2516,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             ),
             Tool(
                 name="get_profile_link",
-                func=lambda session_id_input: self._get_profile_link(session_id),
+                func=lambda session_id_input: self._get_profile_link(session_id_input),
                 description="Get profile link for a user using session_id",
             ),
         ]
@@ -2613,3 +2631,68 @@ Thank you! Your application is now complete. Loan application decision: {decisio
         except Exception as e:
             logger.error(f"Error determining loan decision for session {session_id}: {e}")
             return {"status": "PENDING", "link": profile_link}
+
+    def check_jp_cardless(self, session_id: str) -> Dict[str, Any]:
+        """
+        Establish eligibility for Juspay Cardless
+        """
+        logger.info(f"Session {session_id}: Starting check_jp_cardless")
+        try:
+            session = self.get_session_from_db(session_id)
+            if not session or "data" not in session:
+                logger.error(f"Session {session_id}: Session data not found for check_jp_cardless.")
+                return {"status": "ERROR", "message": "Session data not found."}
+
+
+            session_data = session["data"]
+            loan_id = session_data.get("loanId")
+            # Try to get loanId from API response with safe access
+            api_responses = session_data.get("api_responses", {})
+            if api_responses and "save_loan_details" in api_responses:
+                save_loan_response = api_responses["save_loan_details"]
+                if isinstance(save_loan_response, dict) and "data" in save_loan_response:
+                    # API response format: {"status": 200, "data": {"loanId": "...", ...}}
+                    loan_id = save_loan_response["data"].get("loanId") or loan_id
+                elif isinstance(save_loan_response, dict) and "loanId" in save_loan_response:
+                    # Direct loanId in response
+                    loan_id = save_loan_response.get("loanId") or loan_id
+            
+            logger.info(f"Session {session_id}: Retrieved loan_id: {loan_id} for check_jp_cardless")
+
+            if not loan_id:
+                logger.error(f"Session {session_id}: loanId not found in session data for check_jp_cardless.")
+                return {"status": "ERROR", "message": "loanId not found in session."}
+
+            result = self.api_client.check_eligibility_for_jp_cardless(loan_id)
+            logger.info(f"Session {session_id}: check_eligibility_for_jp_cardless API response: {result}")
+            profile_link = self._get_profile_link(session_id)
+
+            if result and result.get("status") == 200:
+                if result.get("data") == "ELIGIBLE":
+                    logger.info(f"Session {session_id}: User is ELIGIBLE for Juspay Cardless based on check_eligibility.")
+                    result1 = self.api_client.establish_eligibility(loan_id)
+                    logger.info(f"Session {session_id}: establish_eligibility API response: {result1}")
+                    # Check if status is 200 AND data is not empty/null
+                    if result1 and result1.get("status") == 200:
+                        data = result1.get("data")
+                        # Check if data is not empty/null
+                        if data and (isinstance(data, list) and len(data) > 0) or (isinstance(data, dict) and data) or (isinstance(data, str) and data.strip()):
+                            logger.info(f"Session {session_id}: Juspay Cardless eligibility ESTABLISHED with valid data.")
+                            return {"status": "ELIGIBLE", "profile_link": profile_link, "message": "User is eligible for Juspay Cardless."}
+                        else:
+                            logger.info(f"Session {session_id}: Juspay Cardless eligibility NOT established - data is empty/null. Data: {data}")
+                            return {"status": "NOT_ELIGIBLE", "message": "This application is not eligible for Juspay Cardless."}
+                    else:
+                        logger.info(f"Session {session_id}: Juspay Cardless eligibility NOT established or API error. API response: {result1}")
+                        return {"status": "NOT_ELIGIBLE", "message": "This application is not eligible for Juspay Cardless."}
+                else:
+                    logger.info(f"Session {session_id}: User is NOT_ELIGIBLE for Juspay Cardless based on check_eligibility. Data: {result.get('data')}")
+                    return {"status": "NOT_ELIGIBLE", "message": "This application is not eligible for Juspay Cardless."}
+            else:
+                logger.warning(f"Session {session_id}: check_eligibility_for_jp_cardless API call failed or returned non-200 status. Response: {result}")
+                return {"status": "API_ERROR", "message": "Could not check Juspay Cardless eligibility due to an API error."}
+            
+        except Exception as e:
+            logger.error(f"Error establishing eligibility for Juspay Cardless for session {session_id}: {e}", exc_info=True)
+            # It's better to return a structured error response
+            return {"status": "EXCEPTION", "message": "An unexpected error occurred while checking Juspay Cardless eligibility."}

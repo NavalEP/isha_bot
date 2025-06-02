@@ -477,3 +477,35 @@ class CarepayAPIClient:
         }
         logger.info(f"Checking if doctor {doctor_id} is mapped by NBFC FIBE")
         return self._make_request('GET', endpoint, params=params)
+    
+    def check_eligibility_for_jp_cardless(self, loan_id: str) -> Dict[str, Any]:
+        """
+        Checks doctor-Juspay mapping.
+        Corresponds to API: /jp/checkEligibilityForJPCardless
+
+        Args:
+            loan_id: The ID of the loan.
+
+        Returns:
+            API response.
+        """
+        endpoint = "jp/checkEligibilityForJPCardless"
+        params = {"loanId": loan_id}
+        logger.info(f"Checking eligibility for Juspay Cardless for loanId: {loan_id}")
+        return self._make_request('GET', endpoint, params=params)
+
+    def establish_eligibility(self, loan_id: str) -> Dict[str, Any]:
+        """
+        Checks for approval for Juspay.
+        Corresponds to API: /jp/establishEligibility
+
+        Args:
+            loan_id: The ID of the loan.
+
+        Returns:
+            API response.
+        """
+        endpoint = "jp/establishEligibility"
+        params = {"loanId": loan_id}
+        logger.info(f"Establishing eligibility for Juspay for loanId: {loan_id}")
+        return self._make_request('GET', endpoint, params=params)
