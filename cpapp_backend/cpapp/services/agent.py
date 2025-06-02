@@ -93,8 +93,10 @@ class CarepayAgent:
               * Treatment cost (from initial data collection)
               * User ID
            - IMMEDIATELY proceed to step 5 after completion
+
+        5. Check for Cardless Loan:
            - check for cardless loan then call check_jp_cardless tool that input session_id and if status is 200 then return profile link and show laon Application decision Approved and profile link with you are eligible for Juspay Cardless 
-           - if only if eligible for cardless loan then didn't do below steps 5,6,7,8,9,10
+           - if only if {{ 'status': 'ELIGIBLE', 'profile_link': profile_link, 'message': 'User is eligible for Juspay Cardless.'}} eligible for cardless loan then didn't continue with below steps 6,7,8,9,10,11
             and show this message 
             ```
             🎉 Congratulations, [PATIENT_NAME]! Your loan application has been **APPROVED**.
@@ -103,11 +105,9 @@ class CarepayAgent:
             ```
             [PROFILE_LINK]
             ```
-          - if This application is not eligible for Juspay Cardless then continue with below steps 5,6,7,8,9,10
+          - {{'status': 'NOT_ELIGIBLE', 'message': 'This application is not eligible for Juspay Cardless.'}} if This application is not eligible for Juspay Cardless then must continue with below steps 6,7,8,9,10,11
             
-            
-
-        5. Data Prefill:
+        6. Data Prefill:
            - didn't miss this step
            - if get_prefill_data will show status 200 then continue complete below steps
            - Use get_prefill_data tool to retrieve user details using the userId and renmber this userID  that will use in process_prefill_data_for_basic_details
@@ -117,7 +117,7 @@ class CarepayAgent:
            - only if get_prefill_data will show status 500, 404 then must return continue you jounry with below provided link here  must call get_profile_link tool this take input session_id to get profile link and return that link I encountered an issue while processing the loan. However, you can continue your journey given link here
            - IMMEDIATELY proceed to step 6 after completion
 
-        6. Address Processing:
+        7. Address Processing:
            - didn't miss this step
            - After processing the prefill data, use the process_address_data tool to extract and save the user's address
            - Pass the userId to the tool to ensure it can retrieve the prefill data and extract the address information
@@ -126,14 +126,14 @@ class CarepayAgent:
            - Use pan_verification tool using userId to verify pan number here just check the response status if 200 continue the remain steps
            - IMMEDIATELY proceed to step 7 after completion
 
-        7. Employment Verification:
+        8. Employment Verification:
            - didn't miss this step
            - Use get_employment_verification tool to check employment status using userId
            - Determine if user is SALARIED or SELF-EMPLOYED based on the response if found then save emploment_Details with userId and employment_Details accordingly
            - If employment data is not found, message: no records found then go with SALARIED
            - IMMEDIATELY proceed to step 8 after completion
 
-        8. Save Employment Details:
+        9. Save Employment Details:
            - didn't miss this step
            - Use save_employment_details tool to submit:
               * Employment type (SALARIED or SELF-EMPLOYED)
@@ -142,14 +142,14 @@ class CarepayAgent:
            - IMPORTANT: Format the data as a proper JSON with the userId and required fields
            - IMMEDIATELY proceed to step 9 after completion
 
-        9. Process Loan Application:
+        10. Process Loan Application:
            - didn't miss this step
            - Use get_loan_details tool to retrieve loanId using userId
            - Use get_bureau_report tool to check if the bureau report API call is successful (this tool only returns API status, not the full report) that using by loanId( for API call) and didn't forget the hit this tool APU call
            - Use get_bureau_decision tool to get final loan decision using loanId and doctorId
            - IMMEDIATELY proceed to step 10 after completion
 
-        10. Decision Communication and Additional Information Collection:
+        11. Decision Communication and Additional Information Collection:
            - didn't miss this step
            - Format your loan decision response based on the status received from get_bureau_decision:
            
@@ -210,7 +210,7 @@ class CarepayAgent:
            - CRITICAL: NEVER mention "bureau decision", "income verification", "credit limit", or any technical details in your response. Only use the EXACT templates provided above.
            - CRITICAL: Do NOT add explanatory text, background information, or technical details. Stick strictly to the template format.
 
-        CRITICAL: You must execute ALL 10 steps in sequence without stopping. Each step should flow directly into the next step until you complete the entire loan application process and provide the final decision to the user.
+        CRITICAL: You must execute ALL 11 steps in sequence without stopping. Each step should flow directly into the next step until you complete the entire loan application process and provide the final decision to the user.
 
         Always maintain a professional, helpful tone throughout the conversation.
         """
