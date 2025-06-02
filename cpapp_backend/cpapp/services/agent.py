@@ -103,7 +103,7 @@ class CarepayAgent:
             ```
             [PROFILE_LINK]
             ```
-          - if tell not eligible for cardless loan then continue with below steps 5,6,7,8,9,10
+          - if This application is not eligible for Juspay Cardless then continue with below steps 5,6,7,8,9,10
             
             
 
@@ -2643,7 +2643,6 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                 logger.error(f"Session {session_id}: Session data not found for check_jp_cardless.")
                 return {"status": "ERROR", "message": "Session data not found."}
 
-
             session_data = session["data"]
             loan_id = session_data.get("loanId")
             # Try to get loanId from API response with safe access
@@ -2678,21 +2677,32 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                         # Check if data is not empty/null
                         if data and (isinstance(data, list) and len(data) > 0) or (isinstance(data, dict) and data) or (isinstance(data, str) and data.strip()):
                             logger.info(f"Session {session_id}: Juspay Cardless eligibility ESTABLISHED with valid data.")
+                            # Update session status to indicate Juspay Cardless approval
+                            self.update_session_data_field(session_id, "data.juspay_cardless_status", "APPROVED")
                             return {"status": "ELIGIBLE", "profile_link": profile_link, "message": "User is eligible for Juspay Cardless."}
                         else:
                             logger.info(f"Session {session_id}: Juspay Cardless eligibility NOT established - data is empty/null. Data: {data}")
+                            # Update session status to indicate Juspay Cardless rejection
+                            self.update_session_data_field(session_id, "data.juspay_cardless_status", "REJECTED")
                             return {"status": "NOT_ELIGIBLE", "message": "This application is not eligible for Juspay Cardless."}
                     else:
                         logger.info(f"Session {session_id}: Juspay Cardless eligibility NOT established or API error. API response: {result1}")
+                        # Update session status to indicate Juspay Cardless rejection
+                        self.update_session_data_field(session_id, "data.juspay_cardless_status", "REJECTED")
                         return {"status": "NOT_ELIGIBLE", "message": "This application is not eligible for Juspay Cardless."}
                 else:
                     logger.info(f"Session {session_id}: User is NOT_ELIGIBLE for Juspay Cardless based on check_eligibility. Data: {result.get('data')}")
+                    # Update session status to indicate Juspay Cardless rejection
+                    self.update_session_data_field(session_id, "data.juspay_cardless_status", "REJECTED")
                     return {"status": "NOT_ELIGIBLE", "message": "This application is not eligible for Juspay Cardless."}
             else:
                 logger.warning(f"Session {session_id}: check_eligibility_for_jp_cardless API call failed or returned non-200 status. Response: {result}")
+                # Update session status to indicate Juspay Cardless error
+                self.update_session_data_field(session_id, "data.juspay_cardless_status", "ERROR")
                 return {"status": "API_ERROR", "message": "Could not check Juspay Cardless eligibility due to an API error."}
             
         except Exception as e:
             logger.error(f"Error establishing eligibility for Juspay Cardless for session {session_id}: {e}", exc_info=True)
-            # It's better to return a structured error response
+            # Update session status to indicate Juspay Cardless error
+            self.update_session_data_field(session_id, "data.juspay_cardless_status", "ERROR")
             return {"status": "EXCEPTION", "message": "An unexpected error occurred while checking Juspay Cardless eligibility."}
