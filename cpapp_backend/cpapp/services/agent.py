@@ -94,7 +94,7 @@ class CarepayAgent:
               * User ID
            - IMMEDIATELY proceed to step 5 after completion
            - check for cardless loan then call check_jp_cardless tool that input session_id and if status is 200 then return profile link and show laon Application decision Approved and profile link with you are eligible for Juspay Cardless 
-           - if the loan application is approved here then didn't do below steps 5,6,7,8,9,10
+           - if only if eligible for cardless loan then didn't do below steps 5,6,7,8,9,10
             and show this message 
             ```
             🎉 Congratulations, [PATIENT_NAME]! Your loan application has been **APPROVED**.
