@@ -2465,7 +2465,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
         2. If Fibe AMBER:
            - If bureau APPROVED -> APPROVED with profile link
            - Otherwise -> INCOME_VERIFICATION_REQUIRED with Fibe link
-        3. If Fibe RED -> Fall back to bureau decision with profile link
+        3. If Fibe RED or profile ingestion 500 error -> Fall back to bureau decision with profile link
         4. If no Fibe status -> Use bureau decision with profile link
         5. If no decisions available -> PENDING with profile link
         
@@ -2486,13 +2486,18 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             # Get Fibe and bureau decisions from session
             api_responses = session["data"].get("api_responses", {})
             check_fibe_flow = api_responses.get("check_fibe_flow")
+            profile_ingestion = api_responses.get("profile_ingestion_for_fibe")
             bureau_decision = session["data"].get("bureau_decision_details")
             
             fibe_status = None
             bureau_status = None
             
-            # Extract Fibe status
-            if check_fibe_flow and check_fibe_flow.get("status") == 200:
+            # Check for profile ingestion 500 error
+            if profile_ingestion and profile_ingestion.get("status") == 500:
+                logger.info(f"Session {session_id}: Profile ingestion returned 500 error - treating as RED status")
+                fibe_status = "RED"
+            # Extract Fibe status if no 500 error
+            elif check_fibe_flow and check_fibe_flow.get("status") == 200:
                 fibe_status = check_fibe_flow.get("data")
                 logger.info(f"Session {session_id}: Fibe status: {fibe_status}")
             
@@ -2503,7 +2508,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             
             # Apply decision flow logic
             decision_status = None
-            link_to_use = profile_link  # Default to profile link
+            link_to_use = profile_link
             
             # 1. If Fibe GREEN -> APPROVED with Fibe link
             if fibe_status == "GREEN":
@@ -2524,7 +2529,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                     link_to_use = fibe_link if fibe_link else profile_link
                     logger.info(f"Session {session_id}: Fibe AMBER + Bureau not APPROVED -> INCOME_VERIFICATION_REQUIRED with Fibe link")
             
-            # 3. If Fibe RED -> Fall back to bureau decision with profile link
+            # 3. If Fibe RED or profile ingestion 500 error -> Fall back to bureau decision with profile link
             elif fibe_status == "RED":
                 if bureau_status == "APPROVED":
                     decision_status = "APPROVED"
@@ -2535,7 +2540,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                 else:
                     decision_status = "PENDING"
                 link_to_use = profile_link
-                logger.info(f"Session {session_id}: Fibe RED -> Using bureau decision ({bureau_status}) with profile link")
+                logger.info(f"Session {session_id}: Fibe RED or profile ingestion 500 error -> Using bureau decision ({bureau_status}) with profile link")
             
             # 4. If no Fibe status -> Use bureau decision with profile link
             elif fibe_status is None:
