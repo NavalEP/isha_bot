@@ -206,9 +206,18 @@ class CarepayAgent:
              Please Enter input 1 or 2 only
              ```
              
-           - For any other status (including INCOME_VERIFICATION_REQUIRED, PENDING, or any status that is NOT exactly "APPROVED"):
+           - For INCOME_VERIFICATION_REQUIRED status (ONLY when bureau decision status is exactly "INCOME_VERIFICATION_REQUIRED"):
              ```
-            Dear [PATIENT_NAME]! Your application is still not Approved We need more 5 more info so that we will check your eligibility of loan Application
+             Dear [PATIENT_NAME]! Your application is still not Approved We need more 5 more info so that we will check your eligibility of loan Application
+             What is the Employment Type of the patient?
+             1. SALARIED
+             2. SELF-EMPLOYED
+             Please Enter input 1 or 2 only
+             ```
+             
+           - For any other status (including PENDING, or any status that is NOT exactly "APPROVED", "REJECTED", or "INCOME_VERIFICATION_REQUIRED"):
+             ```
+             Dear [PATIENT_NAME]! Your application is still not Approved We need more 5 more info so that we will check your eligibility of loan Application
              What is the Employment Type of the patient?
              1. SALARIED
              2. SELF-EMPLOYED
