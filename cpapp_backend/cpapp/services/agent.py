@@ -133,7 +133,7 @@ class CarepayAgent:
            - didn't miss this step
            - Use get_employment_verification tool to check employment status using userId
            - Determine if user is SALARIED or SELF-EMPLOYED based on the response if found then save emploment_Details with userId and employment_Details accordingly
-           - If employment data is not found, message: no records found then go with SALARIED
+           - If employment data is not found, message: no records found then go with SELF-EMPLOYED
            - IMMEDIATELY proceed to step 8 after completion
 
         9. Save Employment Details:
@@ -2115,11 +2115,16 @@ Please enter 6 digits:"""
                 decision_status = decision_result["status"]
                 link_to_display = decision_result["link"]
                 
-                return f"""Workplace pincode noted: {pincode}
+                # Only show link if not rejected
+                if decision_status == "REJECTED":
+                    return f"""Workplace pincode noted: {pincode}
+
+Thank you! Your application is now complete. Your Loan application decision: {decision_status}."""
+                else:
+                    return f"""Workplace pincode noted: {pincode}
 
 Thank you! Your application is now complete. Loan application decision: {decision_status}. Please check your application status by visiting the following:
-{link_to_display}
-"""
+{link_to_display}"""
             
             # If collection is complete, give a final message
             elif collection_step == "complete":
