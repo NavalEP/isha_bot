@@ -57,16 +57,11 @@ class CarepayAgent:
         You are a healthcare loan application assistant for CarePay. Your role is to help users apply for loans for medical treatments in a professional and friendly manner.
 
         CRITICAL RULES:
-        1. NEVER deviate from the exact steps and templates provided below
-        2. NEVER add your own explanations or interpretations
-        3. NEVER skip any steps or combine steps
-        4. NEVER modify the exact message templates
-        5. NEVER add additional information not explicitly requested
-        6. NEVER make assumptions about user data
-        7. ALWAYS validate data according to the exact rules specified
-        8. ALWAYS use the exact tool calls in the specified order
-        9. ALWAYS follow the exact response formats provided
-        10. ALWAYS check API response status codes before proceeding
+        1. NEVER modify the message structure or format
+        2. Keep ALL markdown formatting (###, **, etc.)
+        3. Keep ALL line breaks and spacing exactly as shown
+        4. Keep ALL sections including employment type selection
+        5. Do NOT add any additional text or instructions
 
         IMPORTANT: You must complete ALL steps sequentially in one conversation turn. Do not stop after any individual step - continue through the entire process until you reach step 10.
 
@@ -107,17 +102,13 @@ class CarepayAgent:
            - IMMEDIATELY proceed to step 5 after completion
 
         5. Check for Cardless Loan:
-           - check for cardless loan then call check_jp_cardless tool that input session_id and if status is 200 then return profile link and show laon Application decision Approved and profile link with you are eligible for Juspay Cardless 
-           - if only if {{ 'status': 'ELIGIBLE', 'profile_link': profile_link, 'message': 'User is eligible for Juspay Cardless.'}} eligible for cardless loan then didn't continue with below steps 6,7,8,9,10,11
-            and show this message 
-            ```
-            🎉 Congratulations, [PATIENT_NAME]! Your loan application has been **APPROVED**.
-            ```
-            and Continue your journey with the link here
-            ```
-            [PROFILE_LINK]
-            ```
-           - {{'status': 'NOT_ELIGIBLE', 'message': 'This application is not eligible for Juspay Cardless.'}} if This application is not eligible for Juspay Cardless then must continue with below steps 6,7,8,9,10,11
+           - Call check_jp_cardless tool with session_id as input
+           - If response status is "ELIGIBLE":
+             * Show the approval message from the response
+             * Skip remaining steps and end the process
+           - If response status is "NOT_ELIGIBLE" or "API_ERROR":
+             * Continue with remaining steps
+           - IMMEDIATELY proceed to step 6 after completion
 
         6. Data Prefill:
            - didn't miss this step
@@ -161,69 +152,7 @@ class CarepayAgent:
            - Use get_bureau_decision tool to get final loan decision using loanId and doctorId
            - IMMEDIATELY proceed to step 10 after completion
 
-        11. Decision Communication and Additional Information Collection:
-           - didn't miss this step
-           - Format your loan decision response based on the status received from get_bureau_decision:
-           
-           - For APPROVED status (ONLY when bureau decision status is exactly "APPROVED"):
-             * Use the show_detailed_approval flag from the bureau decision response to determine format
-             * If show_detailed_approval is true (treatment cost ≥ ₹100,000):
-             ```
-             ### Loan Application Decision:
-             
-             🎉 Congratulations, [PATIENT_NAME]! Your loan application has been **APPROVED**.
-             
-             **Approval Details:**
-             - Gross Treatment Amount: ₹[grossTreatmentAmount] (extracted from bureau decision response, there is grossTreatAmount in bureau decision response)
-             - DownPayment: ₹[downPayment] (if available from emiPlans this is downPayment in bureau decision response)
-             
-             Would you like to proceed without down payment? If yes, income verification will be required.
-             
-             What is the Employment Type of the patient?   
-             1. SALARIED
-             2. SELF-EMPLOYED
-             Please Enter input 1 or 2 only
-             ```
-             
-             * If show_detailed_approval is false (treatment cost < ₹100,000):
-             ```
-             ### Loan Application Decision:
-             
-             🎉 Congratulations, [PATIENT_NAME]! Your loan application has been **APPROVED**.
-             
-             What is the Employment Type of the patient?   
-             1. SALARIED
-             2. SELF-EMPLOYED
-             Please Enter input 1 or 2 only
-             ```
-           
-           - For REJECTED status (ONLY when bureau decision status is exactly "REJECTED"):
-             ```
-             Dear [PATIENT_NAME]! Your loan application is rejected from one lender and we try another lender give us more info so that we can try another lender
-             What is the Employment Type of the patient?
-             1. SALARIED
-             2. SELF-EMPLOYED
-             Please Enter input 1 or 2 only
-             ```
-             
-           - For any other status (including INCOME_VERIFICATION_REQUIRED, PENDING, or any status that is NOT exactly "APPROVED"):
-             ```
-            Dear [PATIENT_NAME]! Your application is still not Approved We need more 5 more info so that we will check your eligibility of loan Application
-             What is the Employment Type of the patient?
-             1. SALARIED
-             2. SELF-EMPLOYED
-             Please Enter input 1 or 2 only
-             ```
-             
-           - IMPORTANT: when bureau decision is Approved only then show Approved message
-           - IMPORTANT: When bureau decision is approved and all eligible checks are false, still provide the approval information with credit limit and down payment details for loans >= ₹100,000.
-           - IMPORTANT: Extract credit limit from bureau decision response data (look for creditLimit, maxEligibleEMI, or similar fields).
-           - IMPORTANT: Extract down payment information from emiPlans in the bureau decision response if available.
-           - IMPORTANT: Use show_detailed_approval flag from bureau decision response to determine whether to show detailed financial information
-           - CRITICAL: NEVER mention "bureau decision", "income verification", "credit limit", or any technical details in your response. Only use the EXACT templates provided above.
-           - CRITICAL: Do NOT add explanatory text, background information, or technical details. Stick strictly to the template format.
-
-        CRITICAL: You must execute ALL 11 steps in sequence without stopping. Each step should flow directly into the next step until you complete the entire loan application process and provide the final decision to the user.
+        CRITICAL: You must execute ALL 10 steps in sequence without stopping. Each step should flow directly into the next step until you complete the entire loan application process and provide the final decision to the user.
 
         CRITICAL: NEVER deviate from these exact steps and templates. Do not add, modify, or skip any steps.
         """
@@ -1190,11 +1119,26 @@ class CarepayAgent:
             Bureau report status as JSON string
         """
         try:
-            # If loan_id is not provided, try to get from session
-            if not loan_id and session_id:
+            # First try to get loan_id from session data
+            if session_id:
                 session = self.get_session_from_db(session_id)
-                if session and session.get("data", {}).get("loanId"):
-                    loan_id = session["data"]["loanId"]
+                if session and "data" in session:
+                    session_data = session["data"]
+                    
+                    # Check if we already have bureau report in session
+                    if "api_responses" in session_data and "get_bureau_report" in session_data["api_responses"]:
+                        existing_report = session_data["api_responses"]["get_bureau_report"]
+                        if existing_report.get("status") == 200:
+                            logger.info(f"Using existing bureau report from session for loan ID: {loan_id}")
+                            return json.dumps(existing_report)
+                    
+                    # Try to get loan_id from different possible locations in session data
+                    if "loanId" in session_data:
+                        loan_id = session_data["loanId"]
+                    elif "api_responses" in session_data and "get_loan_details" in session_data["api_responses"]:
+                        loan_details = session_data["api_responses"]["get_loan_details"]
+                        if loan_details.get("status") == 200 and "data" in loan_details:
+                            loan_id = loan_details["data"].get("loanId")
                     
             if not loan_id:
                 return "Loan ID is required to get bureau report"
@@ -1257,31 +1201,45 @@ class CarepayAgent:
             loan_id = None
             regenerate_param = 1
 
-            # Check if input_str is just a loan ID (not JSON)
-            if input_str and input_str.strip() and not input_str.strip().startswith('{'):
-                loan_id = input_str.strip()
-            else:
-                # Try to parse as JSON
-                data = json.loads(input_str)
-                loan_id = data.get("loan_id") or data.get("loanId")
-                regenerate_param = data.get("regenerate_param", 1) or data.get("regenerateParam", 1)
-            
-            # If loan_id is not provided, try to get from session
-            if not loan_id and session_id:
-                session = self.get_session_from_db(session_id)
-                if session and "data" in session and "loanId" in session["data"]:
-                    loan_id = session["data"]["loanId"]
-            
-            
-            # Get doctor_id from session if available
+            # First try to get data from session
             if session_id:
                 session = self.get_session_from_db(session_id)
                 if session and "data" in session:
-                    doctor_id = session["data"].get("doctor_id")
-                    if doctor_id is None:
-                        doctor_id = session["data"].get("doctorId")
+                    session_data = session["data"]
+                    
+                    # Check if we already have bureau decision in session
+                    if "api_responses" in session_data and "get_bureau_decision" in session_data["api_responses"]:
+                        existing_decision = session_data["api_responses"]["get_bureau_decision"]
+                        if existing_decision.get("status") == 200:
+                            logger.info(f"Using existing bureau decision from session for loan ID: {loan_id}")
+                            return json.dumps(existing_decision)
+                    
+                    # Try to get loan_id from different possible locations in session data
+                    if "loanId" in session_data:
+                        loan_id = session_data["loanId"]
+                    elif "api_responses" in session_data and "get_loan_details" in session_data["api_responses"]:
+                        loan_details = session_data["api_responses"]["get_loan_details"]
+                        if loan_details.get("status") == 200 and "data" in loan_details:
+                            loan_id = loan_details["data"].get("loanId")
+                    
+                    # Get doctor_id from session data
+                    doctor_id = session_data.get("doctor_id") or session_data.get("doctorId")
                     if doctor_id:
                         logger.info(f"Using doctor_id {doctor_id} from session for bureau decision")
+
+            # If we don't have loan_id from session, try to get from input
+            if not loan_id:
+                # Check if input_str is just a loan ID (not JSON)
+                if input_str and input_str.strip() and not input_str.strip().startswith('{'):
+                    loan_id = input_str.strip()
+                else:
+                    # Try to parse as JSON
+                    try:
+                        data = json.loads(input_str)
+                        loan_id = data.get("loan_id") or data.get("loanId")
+                        regenerate_param = data.get("regenerate_param", 1) or data.get("regenerateParam", 1)
+                    except json.JSONDecodeError:
+                        pass
 
             # Validate required parameters
             if not loan_id:
@@ -1302,54 +1260,18 @@ class CarepayAgent:
             # Log the raw API response for debugging
             logger.info(f"Bureau decision API response for loan ID {loan_id}: {json.dumps(result)}")
             
-            # Check treatment cost from session data and modify response accordingly
-            treatment_cost = None
-            show_detailed_approval = False
-            
-            if session_id:
-                session = self.get_session_from_db(session_id)
-                if session and "data" in session:
-                    # Check for treatment cost in different possible field names
-                    session_data = session["data"]
-                    treatment_cost = (session_data.get("treatmentCost") or 
-                                    session_data.get("treatment_cost") or 
-                                    session_data.get("loanAmount"))
-                    
-                    if treatment_cost:
-                        try:
-                            # Convert to float for comparison
-                            cost_value = float(str(treatment_cost).replace(',', '').replace('₹', ''))
-                            show_detailed_approval = cost_value >= 100000
-                            logger.info(f"Treatment cost: ₹{cost_value}, Show detailed approval: {show_detailed_approval}")
-                        except (ValueError, TypeError):
-                            logger.warning(f"Could not parse treatment cost: {treatment_cost}")
-                            show_detailed_approval = False
-            
-            # Check if the response contains the special INCOME_VERIFICATION_REQUIRED status
-            if (isinstance(result, dict) and result.get("status") == 200 and 
-                isinstance(result.get("data"), dict)):
-                
-                data = result.get("data", {})
-                status = data.get("status") or data.get("bureauDecision")
-                
-                # Add treatment cost logic to the response data
-                if status and status.upper() == "APPROVED":
-                    # Add metadata to help the system prompt determine response format
-                    data["show_detailed_approval"] = show_detailed_approval
-                    data["treatment_cost"] = treatment_cost
-                    logger.info(f"APPROVED status detected. Show detailed approval: {show_detailed_approval}")
-                
-                if status and "INCOME" in status.upper() and "VERIFICATION" in status.upper():
-                    logger.info(f"INCOME VERIFICATION status detected in bureau decision: {status}")
-            
             # Process result to extract and format eligible EMI information
             if isinstance(result, dict) and result.get("status") == 200:
                 bureau_result = self.extract_bureau_decision_details(result, session_id)
                 # Store the result in session for easy reference using update_session_data_field
                 if session_id:
                     self.update_session_data_field(session_id, "data.bureau_decision_details", bureau_result)
-                    self.update_session_data_field(session_id, "data.show_detailed_approval", show_detailed_approval)
                     logger.info(f"Stored bureau decision details in session: {bureau_result}")
+                
+                # Format the response using the new function
+                formatted_response = self._format_bureau_decision_response(bureau_result, session_id)
+                
+                return formatted_response
             
             return json.dumps(result)
         except Exception as e:
@@ -2543,7 +2465,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
         2. If Fibe AMBER:
            - If bureau APPROVED -> APPROVED with profile link
            - Otherwise -> INCOME_VERIFICATION_REQUIRED with Fibe link
-        3. If Fibe RED -> Fall back to bureau decision with profile link
+        3. If Fibe RED or profile ingestion 500 error -> Fall back to bureau decision with profile link
         4. If no Fibe status -> Use bureau decision with profile link
         5. If no decisions available -> PENDING with profile link
         
@@ -2564,13 +2486,18 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             # Get Fibe and bureau decisions from session
             api_responses = session["data"].get("api_responses", {})
             check_fibe_flow = api_responses.get("check_fibe_flow")
+            profile_ingestion = api_responses.get("profile_ingestion_for_fibe")
             bureau_decision = session["data"].get("bureau_decision_details")
             
             fibe_status = None
             bureau_status = None
             
-            # Extract Fibe status
-            if check_fibe_flow and check_fibe_flow.get("status") == 200:
+            # Check for profile ingestion 500 error
+            if profile_ingestion and profile_ingestion.get("status") == 500:
+                logger.info(f"Session {session_id}: Profile ingestion returned 500 error - treating as RED status")
+                fibe_status = "RED"
+            # Extract Fibe status if no 500 error
+            elif check_fibe_flow and check_fibe_flow.get("status") == 200:
                 fibe_status = check_fibe_flow.get("data")
                 logger.info(f"Session {session_id}: Fibe status: {fibe_status}")
             
@@ -2581,7 +2508,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             
             # Apply decision flow logic
             decision_status = None
-            link_to_use = profile_link  # Default to profile link
+            link_to_use = profile_link
             
             # 1. If Fibe GREEN -> APPROVED with Fibe link
             if fibe_status == "GREEN":
@@ -2602,7 +2529,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                     link_to_use = fibe_link if fibe_link else profile_link
                     logger.info(f"Session {session_id}: Fibe AMBER + Bureau not APPROVED -> INCOME_VERIFICATION_REQUIRED with Fibe link")
             
-            # 3. If Fibe RED -> Fall back to bureau decision with profile link
+            # 3. If Fibe RED or profile ingestion 500 error -> Fall back to bureau decision with profile link
             elif fibe_status == "RED":
                 if bureau_status == "APPROVED":
                     decision_status = "APPROVED"
@@ -2613,7 +2540,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                 else:
                     decision_status = "PENDING"
                 link_to_use = profile_link
-                logger.info(f"Session {session_id}: Fibe RED -> Using bureau decision ({bureau_status}) with profile link")
+                logger.info(f"Session {session_id}: Fibe RED or profile ingestion 500 error -> Using bureau decision ({bureau_status}) with profile link")
             
             # 4. If no Fibe status -> Use bureau decision with profile link
             elif fibe_status is None:
@@ -2692,7 +2619,19 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                             logger.info(f"Session {session_id}: Juspay Cardless eligibility ESTABLISHED with valid data.")
                             # Update session status to indicate Juspay Cardless approval
                             self.update_session_data_field(session_id, "data.juspay_cardless_status", "APPROVED")
-                            return {"status": "ELIGIBLE", "profile_link": profile_link, "message": "User is eligible for Juspay Cardless."}
+                            
+                            # Get patient name from session data
+                            patient_name = session_data.get("name") or session_data.get("fullName", "Patient")
+                            
+                            # Create Juspay Cardless specific approval message
+                            formatted_response = f"""### Loan Application Decision:
+
+🎉 Congratulations, {patient_name}! Your loan application has been **APPROVED** for Juspay Cardless.
+
+Continue your journey with the link here:
+{profile_link}"""
+                            
+                            return {"status": "ELIGIBLE", "message": formatted_response}
                         else:
                             logger.info(f"Session {session_id}: Juspay Cardless eligibility NOT established - data is empty/null. Data: {data}")
                             # Update session status to indicate Juspay Cardless rejection
@@ -2719,3 +2658,103 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             # Update session status to indicate Juspay Cardless error
             self.update_session_data_field(session_id, "data.juspay_cardless_status", "ERROR")
             return {"status": "EXCEPTION", "message": "An unexpected error occurred while checking Juspay Cardless eligibility."}
+
+    def _format_bureau_decision_response(self, bureau_decision: Dict[str, Any], session_id: str) -> str:
+        """
+        Format the bureau decision response based on the status and details
+        
+        Args:
+            bureau_decision: Bureau decision response data
+            session_id: Session identifier
+            
+        Returns:
+            Formatted response message
+        """
+        try:
+            session = self.get_session_from_db(session_id)
+            if not session:
+                return "Session not found. Please start a new conversation."
+            
+            # Get patient name from session data
+            patient_name = session["data"].get("name") or session["data"].get("fullName", "Patient")
+            
+            # Get treatment cost from session data
+            treatment_cost = session["data"].get("treatmentCost")
+            show_detailed_approval = False
+            
+            if treatment_cost:
+                try:
+                    cost_value = float(str(treatment_cost).replace(',', '').replace('₹', ''))
+                    show_detailed_approval = cost_value >= 100000
+                except (ValueError, TypeError):
+                    show_detailed_approval = False
+            
+            # Get status from bureau decision
+            status = bureau_decision.get("status")
+            
+            # Format response based on status
+            if status == "APPROVED":
+                if show_detailed_approval:
+                    # Get loan amount from bureau decision
+                    loan_amount = bureau_decision.get("loanAmount", 0)
+                    
+                    # Try to get down payment and gross treatment amount from emiPlans
+                    emi_plans = bureau_decision.get("emiPlanList", [])
+                    down_payment = treatment_cost - 100000
+                    gross_treatment_amount = 100000
+                    
+                    try:
+                        if emi_plans and isinstance(emi_plans, list) and len(emi_plans) > 0:
+                            first_plan = emi_plans[0]
+                            if isinstance(first_plan, dict):
+                                # Get down payment from first plan
+                                down_payment = first_plan.get("downPayment", 0)
+                                # If gross treatment amount is not in plan, use loan amount
+                                if not first_plan.get("grossTreatmentAmount"):
+                                    gross_treatment_amount = loan_amount
+                                else:
+                                    gross_treatment_amount = first_plan.get("grossTreatmentAmount")
+                    except Exception as e:
+                        logger.error(f"Error processing EMI plan details: {e}")
+                    
+                    return f"""### Loan Application Decision:
+
+🎉 Congratulations, {patient_name}! Your loan application has been **APPROVED**.
+
+**Approval Details:**
+- Gross Treatment Amount: ₹{gross_treatment_amount:,.0f}
+- DownPayment: ₹{down_payment:,.0f}
+
+Would you like to proceed without down payment? If yes, income verification will be required.
+
+What is the Employment Type of the patient?   
+1. SALARIED
+2. SELF-EMPLOYED
+Please Enter input 1 or 2 only"""
+                else:
+                    return f"""### Loan Application Decision:
+
+🎉 Congratulations, {patient_name}! Your loan application has been **APPROVED**.
+
+What is the Employment Type of the patient?   
+1. SALARIED
+2. SELF-EMPLOYED
+Please Enter input 1 or 2 only"""
+            
+            elif status == "REJECTED":
+                return f"""Dear {patient_name}! Your loan application is rejected from one lender and we try another lender give us more info so that we can try another lender
+What is the Employment Type of the patient?
+1. SALARIED
+2. SELF-EMPLOYED
+Please Enter input 1 or 2 only"""
+            
+            elif status == "INCOME_VERIFICATION_REQUIRED":
+                return f"""Dear {patient_name}! Your application is still not Approved We need more 5 more info so that we will check your eligibility of loan Application
+What is the Employment Type of the patient?
+1. SALARIED
+2. SELF-EMPLOYED
+Please Enter input 1 or 2 only"""
+                
+        except Exception as e:
+            logger.error(f"Error formatting bureau decision response: {e}")
+            return "There was an error processing the loan decision. Please try again."
