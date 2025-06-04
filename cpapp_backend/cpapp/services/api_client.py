@@ -510,22 +510,3 @@ class CarepayAPIClient:
         logger.info(f"Establishing eligibility for Juspay for loanId: {loan_id}")
         return self._make_request('GET', endpoint, params=params)
     
-    def save_emplyment_data_for_salaried_only_workplace_pincode(self, user_id: str, workplace_pincode: str) -> Dict[str, Any]:
-        """
-        Save workplace pincode for salaried users.
-        Corresponds to API: saveEmploymentDataForSalariedOnlyWorkplacePincode
-
-        Args:
-            user_id: The ID of the user
-            workplace_pincode: The pincode of the workplace
-
-        Returns:
-            API response
-        """
-        endpoint = "userDetails/employmentDetail"
-        data = {
-            "userId": user_id,
-            "workplacePincode": workplace_pincode
-        }
-        logger.info(f"Saving workplace pincode for user {user_id}")
-        return self._make_request('POST', endpoint, json=data)
