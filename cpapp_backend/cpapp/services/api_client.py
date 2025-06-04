@@ -234,7 +234,7 @@ class CarepayAPIClient:
         endpoint = f"userDetails/employmentDetail"
         data = {
             "employmentType": employment_data.get("employmentType", None),
-            "formStatus": "Employment",
+            "formStatus": "",
             "monthlyFamilyIncome": employment_data.get("monthlyFamilyIncome", None),
             "nameOfBusiness": employment_data.get("nameOfBusiness", None), 
             "netTakeHomeSalary": employment_data.get("netTakeHomeSalary", None),
@@ -509,3 +509,4 @@ class CarepayAPIClient:
         params = {"loanId": loan_id}
         logger.info(f"Establishing eligibility for Juspay for loanId: {loan_id}")
         return self._make_request('GET', endpoint, params=params)
+    
