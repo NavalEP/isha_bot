@@ -694,8 +694,16 @@ class CarepayAgent:
             
             # If successful, extract userId and store in session
             if result.get("status") == 200 and session_id:
-                # According to the problem description, result.get("data") is the userId string.
-                user_id_from_api = result.get("data")
+                # Parse the data field if it's a JSON string
+                data = result.get("data")
+                if isinstance(data, str):
+                    try:
+                        parsed_data = json.loads(data)
+                        user_id_from_api = parsed_data.get("userId")
+                    except json.JSONDecodeError:
+                        user_id_from_api = data
+                else:
+                    user_id_from_api = data
                 
                 # Ensure extracted_user_id is a non-empty string
                 if isinstance(user_id_from_api, str) and user_id_from_api:
@@ -709,11 +717,10 @@ class CarepayAgent:
                         f"for session {session_id}."
                     )
             
-            return json.dumps(result)
+            return user_id_from_api
         except Exception as e:
             logger.error(f"Error getting user ID from phone number: {e}")
             return f"Error getting user ID from phone number: {str(e)}"
-    
     def get_prefill_data(self, user_id: str = None, session_id: str = None) -> str:
         """
         Get prefilled user data
