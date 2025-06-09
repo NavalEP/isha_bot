@@ -1462,7 +1462,7 @@ class CarepayAgent:
             
             # Extract fields from prefill_data
             field_mappings = {
-                "panCard": ["panCard", "pan"],
+                "panCard": ["panCard", "pan", "panNo"],
                 "gender": ["gender"],
                 "dateOfBirth": ["dateOfBirth", "dob"],
                 "emailId": ["emailId", "email"],
