@@ -157,6 +157,9 @@ class SessionDetailsView(APIView):
                                 'content': str(item)
                             })
                 
+                # Get userId from data field if it exists
+                user_id = session.data.get('userId') if session.data else None
+                
                 # Return existing session data
                 return Response({
                     "status": "success",
@@ -165,7 +168,8 @@ class SessionDetailsView(APIView):
                     "status": session.status,
                     "created_at": session.created_at,
                     "updated_at": session.updated_at,
-                    "history": history
+                    "history": history,
+                    "userId": user_id
                 })
 
             except ObjectDoesNotExist:
