@@ -816,6 +816,8 @@ class CarepayAgent:
                     "user_id": user_id,
                     "address": address
                 })
+            
+            
                 
             result = self.api_client.save_address_details(user_id, address)
             
@@ -1538,6 +1540,7 @@ class CarepayAgent:
         """
         Extract address information from prefill data and save it using save_address_details.
         Looks for 'Primary' address type and extracts postal code (pincode) and address line.
+        If pincode is available, calls state_and_city_by_pincode API to get accurate city and state.
         
         Args:
             input_str: JSON string with userId or userId and prefill_data
@@ -1627,6 +1630,20 @@ class CarepayAgent:
                         pincode = address_data["pincode"].strip()
                         if pincode.isdigit() and len(pincode) <= 6:
                             address_data["pincode"] = pincode.zfill(6)
+                            
+                            # If we have a valid pincode, get city and state from API
+                            try:
+                                pincode_data = self.api_client.state_and_city_by_pincode(address_data["pincode"])
+                                logger.info(f"Pincode API response for pincode {address_data['pincode']}: {pincode_data}")
+                                if pincode_data and pincode_data.get("status") == "success":
+                                    # Only update if we get valid non-null data
+                                    if pincode_data.get("city") and pincode_data["city"] is not None:
+                                        address_data["city"] = pincode_data["city"]
+                                    if pincode_data.get("state") and pincode_data["state"] is not None:
+                                        address_data["state"] = pincode_data["state"]
+                            except Exception as e:
+                                logger.warning(f"Failed to get city/state from pincode API: {e}")
+                                # Continue with original data if API call fails
                     
                     logger.info(f"Extracted address data: {address_data}")
                     

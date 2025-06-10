@@ -510,3 +510,21 @@ class CarepayAPIClient:
         logger.info(f"Establishing eligibility for Juspay for loanId: {loan_id}")
         return self._make_request('GET', endpoint, params=params)
     
+    def state_and_city_by_pincode(self, pincode: str) -> Dict[str, Any]:
+        """
+        Get state and city details from pincode.
+        Corresponds to API: /userDetails/codeDetail
+
+        Args:
+            pincode: The pincode to get state and city for.
+
+        Returns:
+            API response with state and city details.
+        """
+        endpoint = "userDetails/codeDetail"
+        params = {
+            "code": pincode,
+            "type": "zip"
+        }
+        logger.info(f"Getting state and city for pincode: {pincode}")
+        return self._make_request('GET', endpoint, params=params)
