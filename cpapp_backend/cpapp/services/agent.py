@@ -132,8 +132,8 @@ class CarepayAgent:
         8. Employment Verification:
            - didn't miss this step
            - Use get_employment_verification tool to check employment status using userId
-           - Determine if user is SALARIED or SELF-EMPLOYED based on the response if found then save emploment_Details with userId and employment_Details accordingly
-           - If employment data is not found, message: no records found then go with SELF-EMPLOYED
+           - Determine if user is SALARIED or SELF_EMPLOYED based on the response if found then save emploment_Details with userId and employment_Details accordingly
+           - If employment data is not found, message: no records found then go with SELF_EMPLOYED
            - IMMEDIATELY proceed to step 8 after completion
 
         9. Save Employment Details:
