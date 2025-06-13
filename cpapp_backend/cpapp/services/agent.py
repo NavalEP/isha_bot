@@ -139,7 +139,7 @@ class CarepayAgent:
         9. Save Employment Details:
            - didn't miss this step
            - Use save_employment_details tool to submit:
-              * Employment type (SALARIED or SELF-EMPLOYED)
+              * Employment type (SALARIED or SELF_EMPLOYED)
               * Monthly income (from initial data collection)
               * Organization name (if available from verification) other wise pass empty string
            - IMPORTANT: Format the data as a proper JSON with the userId and required fields
@@ -418,7 +418,7 @@ class CarepayAgent:
                 if current_session and current_session.get("data", {}).get("additional_details") is None:
                     self.update_session_data_field(session_id, "data.additional_details", {})
                 
-                return "Thank you for confirming. Now I'll collect some additional information. What is the Employment Type of the patient?\n1. SALARIED\n2. SELF-EMPLOYED"
+                return "Thank you for confirming. Now I'll collect some additional information. What is the Employment Type of the patient?\n1. SALARIED\n2. SELF_EMPLOYED"
 
             chat_history.append(HumanMessage(content=message))
             
@@ -519,7 +519,7 @@ class CarepayAgent:
                 "your applcation rejected from one lender and we try another lender give us more info so that we can try another lender" in ai_message or
                 "Your application is still not Approved We need more 5 more info so that we will check your eligibility of loan Application" in ai_message or
                 "what is the employment type of the patient?" in ai_message.lower() or
-                ("employment type" in ai_message.lower() and ("1. salaried" in ai_message.lower() or "2. self-employed" in ai_message.lower()))):
+                ("employment type" in ai_message.lower() and ("1. salaried" in ai_message.lower() or "2. self_employed" in ai_message.lower()))):
                 # Mark session as collecting additional details
                 self.update_session_data_field(session_id, "status", "collecting_additional_details")
                 self.update_session_data_field(session_id, "data.collection_step", "employment_type")
@@ -1795,7 +1795,7 @@ class CarepayAgent:
             # Add organization or business name based on employment type
             if employment_type == "SALARIED" and organization_name:
                 additional_details["organization_name"] = organization_name
-            elif employment_type == "SELF-EMPLOYED" and business_name:
+            elif employment_type == "SELF_EMPLOYED" and business_name:
                 additional_details["business_name"] = business_name
                 
             # Merge with existing additional details
@@ -1892,10 +1892,10 @@ class CarepayAgent:
                     additional_details["employment_type"] = "SALARIED"
                     selected_option = "SALARIED"
                 elif "2" in message:
-                    additional_details["employment_type"] = "SELF-EMPLOYED"
-                    selected_option = "SELF-EMPLOYED"
+                    additional_details["employment_type"] = "SELF_EMPLOYED"
+                    selected_option = "SELF_EMPLOYED"
                 else:
-                    return "Please select a valid option for Employment Type: 1. SALARIED or 2. SELF-EMPLOYED"
+                    return "Please select a valid option for Employment Type: 1. SALARIED or 2. SELF_EMPLOYED"
                 
                 # Update session data with employment type using update_session_data_field
                 self.update_session_data_field(session_id, "data.additional_details", additional_details)
@@ -1999,7 +1999,7 @@ What is the Business Name of the patient?"""
 What is the workplace/office pincode? (This is different from your home address pincode - we need the pincode where you work)
 Please enter 6 digits:"""
             
-            # Handle business name input (for SELF-EMPLOYED)
+            # Handle business name input (for SELF_EMPLOYED)
             elif collection_step == "business_name":
                 additional_details["business_name"] = message.strip()
                 
@@ -2249,7 +2249,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             # Map organization or business name
             if employment_data.get("employmentType") == "SALARIED" and additional_details.get("organization_name"):
                 employment_data["organizationName"] = additional_details["organization_name"]
-            elif employment_data.get("employmentType") == "SELF-EMPLOYED" and additional_details.get("business_name"):
+            elif employment_data.get("employmentType") == "SELF_EMPLOYED" and additional_details.get("business_name"):
                 employment_data["nameOfBusiness"] = additional_details["business_name"]
                 
             # Map workplace pincode if available
@@ -2758,7 +2758,7 @@ Would you like to proceed without down payment? If yes, income verification will
 
 What is the Employment Type of the patient?   
 1. SALARIED
-2. SELF-EMPLOYED
+2. SELF_EMPLOYED
 Please Enter input 1 or 2 only"""
                 else:
                     return f"""### Loan Application Decision:
@@ -2767,21 +2767,21 @@ Please Enter input 1 or 2 only"""
 
 What is the Employment Type of the patient?   
 1. SALARIED
-2. SELF-EMPLOYED
+2. SELF_EMPLOYED
 Please Enter input 1 or 2 only"""
             
             elif status == "REJECTED":
                 return f"""Dear {patient_name}! Your loan application is rejected from one lender and we try another lender give us more info so that we can try another lender
 What is the Employment Type of the patient?
 1. SALARIED
-2. SELF-EMPLOYED
+2. SELF_EMPLOYED
 Please Enter input 1 or 2 only"""
             
             elif status == "INCOME_VERIFICATION_REQUIRED":
                 return f"""Dear {patient_name}! Your application is still not Approved We need more 5 more info so that we will check your eligibility of loan Application
 What is the Employment Type of the patient?
 1. SALARIED
-2. SELF-EMPLOYED
+2. SELF_EMPLOYED
 Please Enter input 1 or 2 only"""
                 
         except Exception as e:
