@@ -40,6 +40,13 @@ class ChatSessionView(APIView):
     
     def post(self, request):
         try:
+            # Check if user is authenticated
+            if not request.user or request.user == 'AnonymousUser':
+                return Response({
+                    "status": "error",
+                    "message": "Authentication required"
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
             # Get phone number from authenticated user
             phone_number = request.user
             
@@ -84,6 +91,13 @@ class ChatMessageView(APIView):
     
     def post(self, request):
         try:
+            # Check if user is authenticated
+            if not request.user or request.user == 'AnonymousUser':
+                return Response({
+                    "status": "error",
+                    "message": "Authentication required"
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
             # Get phone number from authenticated user
             phone_number = request.user
             
@@ -129,6 +143,13 @@ class SessionDetailsView(APIView):
         Get session details by UUID
         """
         try:
+            # Check if user is authenticated
+            if not request.user or request.user == 'AnonymousUser':
+                return Response({
+                    "status": "error",
+                    "message": "Authentication required"
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
             # Convert string UUID to UUID object
             try:
                 session_uuid = UUID(str(session_uuid))  # Ensure we're working with a string first
