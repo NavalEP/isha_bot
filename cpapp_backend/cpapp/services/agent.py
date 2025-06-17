@@ -1305,7 +1305,8 @@ class CarepayAgent:
                 "status": None,
                 "reason": None,
                 "maxEligibleEMI": None,
-                "emiPlans": []
+                "emiPlans": [],
+                "creditLimitCalculated": None
             }
             
             if not isinstance(bureau_result, dict) or bureau_result.get("status") != 200:
@@ -1340,9 +1341,20 @@ class CarepayAgent:
             elif "eligibleEMI" in data:
                 details["maxEligibleEMI"] = data["eligibleEMI"]
             
-            # Extract EMI plans
-            if "emiPlans" in data and isinstance(data["emiPlans"], list):
-                details["emiPlans"] = data["emiPlans"]
+            # Extract EMI plans and find max credit limit
+            if "emiPlanList" in data and isinstance(data["emiPlanList"], list):
+                details["emiPlans"] = data["emiPlanList"]
+                
+                # Find maximum creditLimitCalculated from all plans
+                try:
+                    max_credit_limit = max(
+                        (float(plan.get("creditLimitCalculated", 0)) for plan in details["emiPlans"] if plan.get("creditLimitCalculated")),
+                        default=None
+                    )
+                    if max_credit_limit:
+                        details["creditLimitCalculated"] = str(int(max_credit_limit))
+                except (ValueError, TypeError):
+                    pass
                 
                 # If we have plans but no max eligible EMI, use the highest EMI
                 if not details["maxEligibleEMI"] and details["emiPlans"]:
@@ -1372,7 +1384,8 @@ class CarepayAgent:
                 "status": None,
                 "reason": None,
                 "maxEligibleEMI": None,
-                "emiPlans": []
+                "emiPlans": [],
+                "creditLimitCalculated": None
             }
 
     def process_prefill_data_for_basic_details(self, input_data, user_id=None, session_id=None):
@@ -2746,6 +2759,17 @@ Continue your journey with the link here:
                     except Exception as e:
                         logger.error(f"Error processing EMI plan details: {e}")
                     
+                    # Ensure numeric values for formatting
+                    try:
+                        gross_treatment_amount = float(str(gross_treatment_amount).replace(',', '').replace('₹', '')) if gross_treatment_amount else 0
+                    except (ValueError, TypeError):
+                        gross_treatment_amount = 0
+                    
+                    try:
+                        down_payment = float(str(down_payment).replace(',', '').replace('₹', '')) if down_payment else 0
+                    except (ValueError, TypeError):
+                        down_payment = 0
+                    
                     return f"""### Loan Application Decision:
 
 🎉 Congratulations, {patient_name}! Your loan application has been **APPROVED**.
@@ -2761,9 +2785,17 @@ What is the Employment Type of the patient?
 2. SELF_EMPLOYED
 Please Enter input 1 or 2 only"""
                 else:
+                    # Ensure numeric value for credit limit formatting
+                    credit_limit = bureau_decision.get("creditLimitCalculated", 0)
+                    try:
+                        credit_limit = float(str(credit_limit).replace(',', '').replace('₹', '')) if credit_limit else 0
+                    except (ValueError, TypeError):
+                        credit_limit = 0
+                    
                     return f"""### Loan Application Decision:
 
 🎉 Congratulations, {patient_name}! Your loan application has been **APPROVED**.
+Approval Amount limit : ₹{credit_limit:,.0f}
 
 What is the Employment Type of the patient?   
 1. SALARIED
