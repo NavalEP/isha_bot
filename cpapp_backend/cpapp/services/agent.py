@@ -117,7 +117,9 @@ class CarepayAgent:
            - Extract from the response: PAN number, gender, DOB, email (if available)
            - didn't forget the userId what give to process_prefill_data_for_basic_details
            - Use the process_prefill_data_for_basic_details tool to formate process_prefill_data for save_basic_details in process_prefill_data_for_basic_details there i calling save_basic_details with userId and prefill data as input  and also give userId in process_prefill_data_for_basic_details
-           - only if get_prefill_data will show status 500, 404 then must return continue you jounry with below provided link here  must call get_profile_link tool this take input session_id to get profile link and return that link I encountered an issue while processing the loan. However, you can continue your journey given link here
+           - If get_prefill_data returns status 500 or 404:
+             * Call get_profile_link tool with session_id to obtain the profile link
+             * Respond: "Thank you [patient name]. I've collected your details. You can continue your loan application through this link: [profile link]"
            - IMMEDIATELY proceed to step 6 after completion
 
         7. Address Processing:
