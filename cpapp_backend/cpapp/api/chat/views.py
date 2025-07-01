@@ -47,12 +47,13 @@ class ChatSessionView(APIView):
                     "message": "Authentication required"
                 }, status=status.HTTP_401_UNAUTHORIZED)
             
-            # Get phone number from authenticated user
-            phone_number = request.user
+            # Get user identifier from authenticated user (could be phone_number or doctor_id)
+            user_identifier = request.user
             
             # Extract doctor information from the JWT token
             doctor_id = None
             doctor_name = None
+            phone_number = None
             
             # Get the token from the Authorization header
             auth_header = request.META.get('HTTP_AUTHORIZATION')
@@ -60,15 +61,28 @@ class ChatSessionView(APIView):
                 try:
                     token = auth_header.split(' ')[1]
                     payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+                    
+                    # Extract doctor information
                     doctor_id = payload.get('doctor_id')
                     doctor_name = payload.get('doctor_name')
-                    logger.info(f"Extracted doctor_id: {doctor_id}, doctor_name: {doctor_name} from JWT token")
+                    
+                    # Extract phone number if available
+                    phone_number = payload.get('phone_number')
+
+                    
+                    # If user_identifier is a doctor_id, use it as phone_number for session creation
+                    if not phone_number and doctor_id and user_identifier == doctor_id:
+                        phone_number = f"{doctor_name}/{doctor_id}"  # Create a unique identifier for doctor sessions
+
+    
+                    
+                    logger.info(f"Extracted doctor_id: {doctor_id}, doctor_name: {doctor_name}, phone_number: {phone_number} from JWT token")
                 except Exception as e:
                     logger.error(f"Error extracting doctor info from token: {e}")
             
             # Create session with doctor information
             session_id = carepay_agent.create_session(doctor_id=doctor_id, doctor_name=doctor_name, phone_number=phone_number)
-            print(f"session_id: {session_id} created_at: {datetime.datetime.now()} by user: {phone_number}")
+            print(f"session_id: {session_id} created_at: {datetime.datetime.now()} by user: {user_identifier}")
             return Response({
                 "status": "success",
                 "session_id": session_id
@@ -98,8 +112,8 @@ class ChatMessageView(APIView):
                     "message": "Authentication required"
                 }, status=status.HTTP_401_UNAUTHORIZED)
             
-            # Get phone number from authenticated user
-            phone_number = request.user
+            # Get user identifier from authenticated user (could be phone_number or doctor_id)
+            user_identifier = request.user
             
             # Extract data from request
             session_id = request.data.get("session_id")
@@ -113,7 +127,7 @@ class ChatMessageView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
             print(f"session_id: {session_id}")  
             print(f"message: {message}")
-            print(f"user: {phone_number}")
+            print(f"user: {user_identifier}")
             
             # Process message with agent
             response = carepay_agent.run(session_id, message)
@@ -149,6 +163,8 @@ class SessionDetailsView(APIView):
                     "status": "error",
                     "message": "Authentication required"
                 }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_identifier = request.user
             
             # Convert string UUID to UUID object
             try:

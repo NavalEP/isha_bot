@@ -21,14 +21,20 @@ class JWTAuthentication(BaseAuthentication):
             # Decode the token
             payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
             
-            # Extract the phone number from the payload
+            # Check for phone_number (from OTP verification)
             phone_number = payload.get('phone_number')
             
-            if not phone_number:
-                raise AuthenticationFailed('Invalid token payload')
+            # Check for doctor_id (from doctor staff login)
+            doctor_id = payload.get('doctor_id')
+            
+            # Use phone_number if available, otherwise use doctor_id as identifier
+            user_identifier = phone_number if phone_number else doctor_id
+            
+            if not user_identifier:
+                raise AuthenticationFailed('Invalid token payload - missing phone_number or doctor_id')
                 
-            # Return the user identifier (phone_number) and auth info
-            return (phone_number, token)
+            # Return the user identifier and auth info
+            return (user_identifier, token)
             
         except IndexError:
             raise AuthenticationFailed('Token prefix missing')

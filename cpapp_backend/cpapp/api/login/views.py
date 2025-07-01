@@ -97,3 +97,53 @@ class VerifyOtpView(APIView):
         print(response_data)
         
         return Response(response_data, status=status.HTTP_200_OK)
+
+
+class DoctorStaffView(APIView):
+    """
+    API view for doctor staff login
+    """
+    def post(self, request):
+        doctor_code = request.data.get('doctor_code')
+        password = request.data.get('password')
+        
+        if not doctor_code or not password:
+            return Response(
+                {"error": "Doctor code and password are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        # Initialize the CarePay API client
+        api_client = CarepayAPIClient()
+
+        response = api_client.login_with_password(doctor_code, password)
+        
+        # Check if the request was successful first
+        if response.get('status', 0) >= 400:
+            return Response(
+                {"error": "Invalid doctor code or password"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Access the nested data from the response
+        data = response.get('data', {})
+        doctor_id = data.get('doctorId')
+        doctor_name = data.get('doctorName')
+
+        payload = {
+            'doctor_id': doctor_id,
+            'doctor_name': doctor_name,
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(days=1)
+        }
+
+        token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256') 
+
+        response_data = {
+            "message": "Login successful",
+            "token": token,
+            "doctor_id": doctor_id,
+            "doctor_name": doctor_name
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+        

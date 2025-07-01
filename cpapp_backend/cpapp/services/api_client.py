@@ -528,3 +528,23 @@ class CarepayAPIClient:
         }
         logger.info(f"Getting state and city for pincode: {pincode}")
         return self._make_request('GET', endpoint, params=params)
+    
+    def login_with_password(self, doctor_code: str, password: str) -> Dict[str, Any]:
+        """
+            Login with doctor code and password.
+            Corresponds to API: /loginWithPassword
+
+            Args:
+                doctor_code: The doctor code to login with.
+                password: The password to login with.
+
+            Returns:
+                API response with login details.
+        """
+        endpoint = "loginWithPassword"
+        params = {
+                    "doctorCode": doctor_code,
+                    "password": password
+        }
+        logger.info(f"Logging in doctor with code: {doctor_code}")
+        return self._make_request('GET', endpoint, params=params)

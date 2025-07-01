@@ -1,7 +1,7 @@
 from django.urls import path
 from django.http import JsonResponse
 from cpapp.api.chat.views import ChatSessionView, ChatMessageView, SessionDetailsView
-from cpapp.api.login.views import SendOtpView, VerifyOtpView
+from cpapp.api.login.views import SendOtpView, VerifyOtpView, DoctorStaffView
 
 
 def api_root_view(request):
@@ -13,5 +13,6 @@ urlpatterns = [
     path('message/', ChatMessageView.as_view(), name='send_message'),
     path('login/send-otp/', SendOtpView.as_view(), name='send_otp'),
     path('login/verify-otp/', VerifyOtpView.as_view(), name='verify_otp'),
+    path('login/doctor-staff/', DoctorStaffView.as_view(), name='doctor_staff'),
     path('session-details/<uuid:session_uuid>/', SessionDetailsView.as_view(), name='session_details'),
 ]
