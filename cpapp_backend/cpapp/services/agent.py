@@ -2185,7 +2185,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             session_id: Session identifier
             
         Returns:
-            Profile completion link URL
+            Profile completion link URL (shortened)
         """  
         try:
             session = self.get_session_from_db(session_id)
@@ -2216,7 +2216,12 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                 # Store the cleaned link in session for future reference
                 session["data"]["profile_completion_link"] = profile_link
                 
-                return profile_link
+                # Shorten the URL before returning
+                from cpapp.services.url_shortener import shorten_url
+                short_link = shorten_url(profile_link)
+                logger.info(f"Shortened profile link: {short_link}")
+                
+                return short_link
             else:
                 logger.error(f"Error getting profile link: {profile_link_response}")
                 fallback_url = "https://carepay.money/patient/Gurgaon/Nikhil_Dental_Clinic/Nikhil_Salkar/e71779851b144d1d9a25a538a03612fc/"

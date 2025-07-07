@@ -1,6 +1,6 @@
 from django.urls import path
 from django.http import JsonResponse
-from cpapp.api.chat.views import ChatSessionView, ChatMessageView, SessionDetailsView
+from cpapp.api.chat.views import ChatSessionView, ChatMessageView, SessionDetailsView, ShortlinkRedirectView
 from cpapp.api.login.views import SendOtpView, VerifyOtpView, DoctorStaffView
 
 
@@ -15,4 +15,5 @@ urlpatterns = [
     path('login/verify-otp/', VerifyOtpView.as_view(), name='verify_otp'),
     path('login/doctor-staff/', DoctorStaffView.as_view(), name='doctor_staff'),
     path('session-details/<uuid:session_uuid>/', SessionDetailsView.as_view(), name='session_details'),
+    path('s/<str:short_code>/', ShortlinkRedirectView.as_view(), name='shortlink_redirect'),
 ]

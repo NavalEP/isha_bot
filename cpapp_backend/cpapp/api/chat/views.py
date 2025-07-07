@@ -4,6 +4,8 @@ from django.http import JsonResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from django.shortcuts import redirect
+from django.http import Http404
 
 from asgiref.sync import async_to_sync
 import datetime
@@ -19,6 +21,7 @@ setup_environment()
 
 from cpapp.services.agent import CarepayAgent
 from cpapp.api.login.authentication import JWTAuthentication
+from cpapp.services.url_shortener import get_long_url
 import jwt
 from django.conf import settings
 from cpapp.models.session_data import SessionData
@@ -29,6 +32,47 @@ logger = logging.getLogger(__name__)
 
 # Initialize agent
 carepay_agent = CarepayAgent()
+
+
+class ShortlinkRedirectView(APIView):
+    """
+    View for returning long URLs from short codes
+    """
+    
+    def get(self, request, short_code):
+        """
+        Get the long URL for a short code
+        
+        Args:
+            request: Django request object
+            short_code: The short code from the URL
+            
+        Returns:
+            JSON response containing the long URL
+        """
+        try:
+            # Get the long URL from the short code
+            long_url = get_long_url(short_code)
+            
+            if long_url:
+                return JsonResponse({
+                    "status": "success",
+                    "long_url": long_url
+                })
+            else:
+                # If short code not found, return 404
+                return JsonResponse({
+                    "status": "error",
+                    "message": "Short link not found"
+                }, status=404)
+                
+        except Exception as e:
+            # Log the error and return 404
+            logger.error(f"Error getting long URL for short code {short_code}: {e}")
+            return JsonResponse({
+                "status": "error", 
+                "message": "Short link not found"
+            }, status=404)
 
 
 class ChatSessionView(APIView):
