@@ -22,10 +22,12 @@ from django.views.generic import TemplateView
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.views.static import serve
 import os
+from cpapp.api.chat.views import ShortlinkRedirectView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/agent/', include('cpapp.urls')),
+    path('s/<str:short_code>/', ShortlinkRedirectView.as_view(), name='shortlink_redirect'),
     # Serve images directly from static directory
     path('images/<path:path>', serve, {'document_root': os.path.join(settings.STATICFILES_DIRS[0], 'images')}),
     path('favicon.svg', serve, {'document_root': settings.STATICFILES_DIRS[0], 'path': 'favicon.svg'}),

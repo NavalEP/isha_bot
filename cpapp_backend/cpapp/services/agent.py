@@ -20,6 +20,7 @@ from cpapp.services.api_client import CarepayAPIClient
 from cpapp.models.session_data import SessionData
 from setup_env import setup_environment
 from cpapp.services.helper import Helper
+from cpapp.services.url_shortener import shorten_url
 
 
 setup_environment()
@@ -149,9 +150,9 @@ class CarepayAgent:
 
         10. Process Loan Application:
            - didn't miss this step
-           - Use get_loan_details tool to retrieve loanId using userId
-           - Use get_bureau_report tool to check if the bureau report API call is successful (this tool only returns API status, not the full report) that using by loanId( for API call) and didn't forget the hit this tool APU call
-           - Use get_bureau_decision tool to get final loan decision using loanId and doctorId
+           - call get_loan_details tool using session_id as input
+           - Use get_bureau_report tool with session_id to check if the bureau report API call is successful (this tool only returns API status, not the full report)
+           - Use get_bureau_decision tool to get final loan decision using session_id
            - IMMEDIATELY proceed to step 10 after completion
 
         CRITICAL: You must execute ALL 10 steps in sequence without stopping. Each step should flow directly into the next step until you complete the entire loan application process and provide the final decision to the user.
@@ -1078,7 +1079,7 @@ class CarepayAgent:
             logger.error(f"Error saving loan details: {e}")
             return f"Error saving loan details: {str(e)}"
     
-    def get_loan_details(self, user_id: str = None, session_id: str = None) -> str:
+    def get_loan_details(self, session_id: str = None) -> str:
         """
         Get loan details by user ID
         
@@ -1118,18 +1119,20 @@ class CarepayAgent:
             logger.error(f"Error getting loan details: {e}")
             return f"Error getting loan details: {str(e)}"
     
-    def get_bureau_report(self, loan_id: str = None, session_id: str = None) -> str:
+    def get_bureau_report(self, session_id: str = None) -> str:
         """
         Get bureau report for a loan
         
         Args:
-            loan_id: Loan identifier, optional if available in session
             session_id: Session identifier
             
         Returns:
             Bureau report status as JSON string
         """
         try:
+            # Initialize loan_id
+            loan_id = None
+            
             # First try to get loan_id from session data
             if session_id:
                 session = self.get_session_from_db(session_id)
@@ -1140,7 +1143,7 @@ class CarepayAgent:
                     if "api_responses" in session_data and "get_bureau_report" in session_data["api_responses"]:
                         existing_report = session_data["api_responses"]["get_bureau_report"]
                         if existing_report.get("status") == 200:
-                            logger.info(f"Using existing bureau report from session for loan ID: {loan_id}")
+                            logger.info(f"Using existing bureau report from session")
                             return json.dumps(existing_report)
                     
                     # Try to get loan_id from different possible locations in session data
@@ -1151,8 +1154,15 @@ class CarepayAgent:
                         if loan_details.get("status") == 200 and "data" in loan_details:
                             loan_id = loan_details["data"].get("loanId")
                     
+                    # Also try to get from save_loan_details response
+                    if not loan_id and "api_responses" in session_data and "save_loan_details" in session_data["api_responses"]:
+                        save_loan_response = session_data["api_responses"]["save_loan_details"]
+                        if isinstance(save_loan_response, dict) and save_loan_response.get("status") == 200:
+                            if "data" in save_loan_response and isinstance(save_loan_response["data"], dict):
+                                loan_id = save_loan_response["data"].get("loanId")
+            
             if not loan_id:
-                return "Loan ID is required to get bureau report"
+                return json.dumps({"status": 400, "error": "Loan ID is required to get bureau report"})
             
             logger.info(f"Requesting bureau report for loan ID: {loan_id}")    
             result = self.api_client.get_experian_bureau_report(loan_id)
@@ -1196,73 +1206,91 @@ class CarepayAgent:
                 "message": f"Error getting bureau report: {str(e)}"
             })
     
-    def get_bureau_decision(self, input_str: str, session_id: str) -> str:
+    def get_bureau_decision(self, session_id: str) -> str:
         """
         Get bureau decision for a loan
         
         Args:
-            input_str: JSON string with loan_id 
+            session_id: Session identifier
             
         Returns:
             Bureau decision as JSON string
         """
         try:
             # Initialize variables first
-            doctor_id = None
             loan_id = None
-            regenerate_param = 1
 
             # First try to get data from session
             if session_id:
                 session = self.get_session_from_db(session_id)
+                logger.info(f"Session retrieved: {session is not None}")
+                
                 if session and "data" in session:
                     session_data = session["data"]
+                    logger.info(f"Session data keys: {list(session_data.keys())}")
                     
                     # Check if we already have bureau decision in session
                     if "api_responses" in session_data and "get_bureau_decision" in session_data["api_responses"]:
                         existing_decision = session_data["api_responses"]["get_bureau_decision"]
                         if existing_decision.get("status") == 200:
-                            logger.info(f"Using existing bureau decision from session for loan ID: {loan_id}")
+                            logger.info(f"Using existing bureau decision from session")
                             return json.dumps(existing_decision)
                     
                     # Try to get loan_id from different possible locations in session data
                     if "loanId" in session_data:
                         loan_id = session_data["loanId"]
+                        logger.info(f"Found loan_id in session data: {loan_id}")
                     elif "api_responses" in session_data and "get_loan_details" in session_data["api_responses"]:
                         loan_details = session_data["api_responses"]["get_loan_details"]
+                        logger.info(f"get_loan_details response: {loan_details}")
                         if loan_details.get("status") == 200 and "data" in loan_details:
                             loan_id = loan_details["data"].get("loanId")
+                            logger.info(f"Found loan_id in get_loan_details response: {loan_id}")
                     
-                    # Get doctor_id from session data
-                    doctor_id = session_data.get("doctor_id") or session_data.get("doctorId")
-                    if doctor_id:
-                        logger.info(f"Using doctor_id {doctor_id} from session for bureau decision")
-
-            # If we don't have loan_id from session, try to get from input
-            if not loan_id:
-                # Check if input_str is just a loan ID (not JSON)
-                if input_str and input_str.strip() and not input_str.strip().startswith('{'):
-                    loan_id = input_str.strip()
+                    # Also try to get from save_loan_details response
+                    if not loan_id and "api_responses" in session_data and "save_loan_details" in session_data["api_responses"]:
+                        save_loan_response = session_data["api_responses"]["save_loan_details"]
+                        logger.info(f"save_loan_details response: {save_loan_response}")
+                        if isinstance(save_loan_response, dict) and save_loan_response.get("status") == 200:
+                            if "data" in save_loan_response and isinstance(save_loan_response["data"], dict):
+                                loan_id = save_loan_response["data"].get("loanId")
+                                logger.info(f"Found loan_id in save_loan_details response: {loan_id}")
+                    
+                    # Debug: Show what we have in api_responses
+                    if "api_responses" in session_data:
+                        logger.info(f"Available API responses: {list(session_data['api_responses'].keys())}")
                 else:
-                    # Try to parse as JSON
-                    try:
-                        data = json.loads(input_str)
-                        loan_id = data.get("loan_id") or data.get("loanId")
-                        regenerate_param = data.get("regenerate_param", 1) or data.get("regenerateParam", 1)
-                    except json.JSONDecodeError:
-                        pass
+                    logger.warning(f"No session data found for session_id: {session_id}")
+
 
             # Validate required parameters
+            logger.info(f"Final loan_id before validation: '{loan_id}' (type: {type(loan_id)})")
+            
             if not loan_id:
                 logger.error("Loan ID is missing for bureau decision")
+                logger.error(f"loan_id value: '{loan_id}', type: {type(loan_id)}")
                 return json.dumps({"status": 400, "error": "Loan ID is required"})
-
-            if not doctor_id:
-                logger.error("Doctor ID is missing for bureau decision")
-                return json.dumps({"status": 400, "error": "Doctor ID is required"})
                 
+            # Additional validation for loan_id
+            if not isinstance(loan_id, str):
+                logger.error(f"loan_id is not a string: {type(loan_id)}")
+                return json.dumps({"status": 400, "error": "loan_id must be a string"})
+                
+            if loan_id.strip() == "":
+                logger.error(f"loan_id is empty after stripping: '{loan_id}'")
+                return json.dumps({"status": 400, "error": "loan_id is empty"})
+                
+            logger.info(f"Making bureau decision API call with loan_id: {loan_id}")
+            logger.info(f"loan_id type: {type(loan_id)}, loan_id value: '{loan_id}'")
+            
             # Make the API call
-            result = self.api_client.get_bureau_decision(doctor_id, loan_id, regenerate_param)
+            try:
+                result = self.api_client.get_bureau_decision(loan_id)
+                logger.info(f"API call successful, result type: {type(result)}")
+            except Exception as api_error:
+                logger.error(f"API call failed with error: {api_error}")
+                logger.error(f"loan_id passed to API: '{loan_id}' (type: {type(loan_id)})")
+                raise
             
             # Store the complete API response in session data
             if session_id:
@@ -1344,13 +1372,20 @@ class CarepayAgent:
                 details["maxEligibleEMI"] = data["eligibleEMI"]
             
             # Extract EMI plans and find max credit limit
+            # Support both "emiPlanList" (original API) and "emiPlans" (formatted result)
+            emi_plans_data = None
             if "emiPlanList" in data and isinstance(data["emiPlanList"], list):
-                details["emiPlans"] = data["emiPlanList"]
+                emi_plans_data = data["emiPlanList"]
+            elif "emiPlans" in data and isinstance(data["emiPlans"], list):
+                emi_plans_data = data["emiPlans"]
+            
+            if emi_plans_data:
+                details["emiPlans"] = emi_plans_data
                 
-                # Find maximum creditLimitCalculated from all plans
+                # Find maximum creditLimit from all plans (note: field is "creditLimit" not "creditLimitCalculated")
                 try:
                     max_credit_limit = max(
-                        (float(plan.get("creditLimitCalculated", 0)) for plan in details["emiPlans"] if plan.get("creditLimitCalculated")),
+                        (float(plan.get("creditLimit", 0)) for plan in emi_plans_data if plan.get("creditLimit")),
                         default=None
                     )
                     if max_credit_limit:
@@ -1359,10 +1394,10 @@ class CarepayAgent:
                     pass
                 
                 # If we have plans but no max eligible EMI, use the highest EMI
-                if not details["maxEligibleEMI"] and details["emiPlans"]:
+                if not details["maxEligibleEMI"] and emi_plans_data:
                     try:
                         highest_emi = max(
-                            (float(plan.get("emi", 0)) for plan in details["emiPlans"] if plan.get("emi")),
+                            (float(plan.get("emi", 0)) for plan in emi_plans_data if plan.get("emi")),
                             default=None
                         )
                         if highest_emi:
@@ -1387,7 +1422,7 @@ class CarepayAgent:
                 "reason": None,
                 "maxEligibleEMI": None,
                 "emiPlans": [],
-                "creditLimitCalculated": None
+                "creditLimit": None
             }
 
     def process_prefill_data_for_basic_details(self, input_data, user_id=None, session_id=None):
@@ -2217,7 +2252,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                 session["data"]["profile_completion_link"] = profile_link
                 
                 # Shorten the URL before returning
-                from cpapp.services.url_shortener import shorten_url
+                
                 short_link = shorten_url(profile_link)
                 logger.info(f"Shortened profile link: {short_link}")
                 
@@ -2432,7 +2467,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             ),
             Tool(
                 name="check_jp_cardless",
-                func=lambda session_id_input: self.check_jp_cardless(session_id),
+                func=lambda session_id: self.check_jp_cardless(session_id),
                 description="Check eligibility for Juspay Cardless",
             ),
             Tool(
@@ -2475,18 +2510,18 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             
             Tool(
                 name="get_loan_details",
-                func=lambda user_id=None: self.get_loan_details(user_id, session_id),
-                description="Get loan details for a user",
+                func=lambda session_id: self.get_loan_details(session_id),
+                description="Get loan details for a user using session_id as input",
             ),
             Tool(
                 name="get_bureau_report",
-                func=lambda loan_id=None: self.get_bureau_report(loan_id, session_id),
-                description="Get bureau report for a loan",
+                func=lambda session_id: self.get_bureau_report(session_id),
+                description="Get bureau report for a loan using session_id as input",
             ),
             Tool(
                 name="get_bureau_decision",
-                func=lambda input_str: self.get_bureau_decision(input_str, session_id),
-                description="Get bureau decision for loan application and input is loanId and doctorId that come from get_loan_details",
+                func=lambda session_id: self.get_bureau_decision(session_id),
+                description="Get bureau decision for loan application using session_id as input",
             ),
             Tool(
                 name="get_session_data",
@@ -2500,7 +2535,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             ),
             Tool(
                 name="get_profile_link",
-                func=lambda session_id_input: self._get_profile_link(session_id_input),
+                func=lambda session_id: self._get_profile_link(session_id),
                 description="Get profile link for a user using session_id",
             ),
         ]
@@ -2568,7 +2603,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             # 2. If Fibe AMBER
             elif fibe_status == "AMBER":
                 # If bureau APPROVED -> APPROVED with profile link
-                if bureau_status == "APPROVED":
+                if bureau_status and bureau_status.upper() == "APPROVED":
                     decision_status = "APPROVED"
                     link_to_use = profile_link
                     logger.info(f"Session {session_id}: Fibe AMBER + Bureau APPROVED -> APPROVED with profile link")
@@ -2580,11 +2615,11 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             
             # 3. If Fibe RED or profile ingestion 500 error -> Fall back to bureau decision with profile link
             elif fibe_status == "RED":
-                if bureau_status == "APPROVED":
+                if bureau_status and bureau_status.upper() == "APPROVED":
                     decision_status = "APPROVED"
-                elif bureau_status == "REJECTED":
+                elif bureau_status and bureau_status.upper() == "REJECTED":
                     decision_status = "REJECTED"
-                elif bureau_status == "INCOME_VERIFICATION_REQUIRED":
+                elif bureau_status and bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED":
                     decision_status = "INCOME_VERIFICATION_REQUIRED"
                 else:
                     decision_status = "PENDING"
@@ -2593,11 +2628,11 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             
             # 4. If no Fibe status -> Use bureau decision with profile link
             elif fibe_status is None:
-                if bureau_status == "APPROVED":
+                if bureau_status and bureau_status.upper() == "APPROVED":
                     decision_status = "APPROVED"
-                elif bureau_status == "REJECTED":
+                elif bureau_status and bureau_status.upper() == "REJECTED":
                     decision_status = "REJECTED"
-                elif bureau_status == "INCOME_VERIFICATION_REQUIRED":
+                elif bureau_status and bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED":
                     decision_status = "INCOME_VERIFICATION_REQUIRED"
                 else:
                     decision_status = "PENDING"
@@ -2741,8 +2776,8 @@ Continue your journey with the link here:
             # Get status from bureau decision
             status = bureau_decision.get("status")
             
-            # Format response based on status
-            if status == "APPROVED":
+            # Format response based on status (case-insensitive)
+            if status and status.upper() == "APPROVED":
                 if show_detailed_approval:
                     # Get loan amount from bureau decision
                     loan_amount = bureau_decision.get("loanAmount", 0)
@@ -2802,21 +2837,20 @@ Please Enter input 1 or 2 only"""
                     return f"""### Loan Application Decision:
 
 🎉 Congratulations, {patient_name}! Your loan application has been **APPROVED**.
-Approval Amount limit : ₹{credit_limit:,.0f}
 
 What is the Employment Type of the patient?   
 1. SALARIED
 2. SELF_EMPLOYED
 Please Enter input 1 or 2 only"""
             
-            elif status == "REJECTED":
+            elif status and status.upper() == "REJECTED":
                 return f"""Dear {patient_name}! Your loan application is rejected from one lender and we try another lender give us more info so that we can try another lender
 What is the Employment Type of the patient?
 1. SALARIED
 2. SELF_EMPLOYED
 Please Enter input 1 or 2 only"""
             
-            elif status == "INCOME_VERIFICATION_REQUIRED":
+            elif status and status.upper() == "INCOME_VERIFICATION_REQUIRED":
                 return f"""Dear {patient_name}! Your application is still not Approved We need more 5 more info so that we will check your eligibility of loan Application
 What is the Employment Type of the patient?
 1. SALARIED

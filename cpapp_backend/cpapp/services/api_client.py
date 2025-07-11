@@ -281,13 +281,13 @@ class CarepayAPIClient:
         endpoint = f"experianBureauReport"
         return self._make_request('GET', endpoint, params={"loanId": loan_id})
     
-    def get_bureau_decision(self, doctor_id: str, loan_id: str, regenerate_param: int = 1) -> Dict[str, Any]:
+    def get_bureau_decision(self, loan_id: str) -> Dict[str, Any]:
         """Get bureau-based decision"""
-        endpoint = f"getBureauDecision"
+        endpoint = f"bureauDecisionNew"
         params = {
-            "doctorId": doctor_id,
             "loanId": loan_id,
-            "regenerateParam": regenerate_param
+            "test": 0,
+            "triggeredBy": "user"
         }
         
         result = self._make_request('GET', endpoint, params=params)
@@ -295,72 +295,48 @@ class CarepayAPIClient:
         # If successful, try to extract eligible EMI information
         if result.get("status") == 200:
             try:
-                # Look for max eligible EMI in the response
-                data = result.get("data", {})
+                # Extract data from nested response
+                data = result.get("data", {}).get("data", {})
                 
-                # Extract maxEligibleEMI if present
-                if "maxEligibleEMI" not in data and "eligibleEMI" in data:
-                    result["data"]["maxEligibleEMI"] = data["eligibleEMI"]
+                # Extract key decision fields
+                final_decision = data.get("finalDecision")
+                max_eligible_emi = data.get("maxEligibleEmi")
+                loan_amount = data.get("loanAmount")
+                treatment_amount = data.get("treatmentAmount")
                 
-                # If not directly available, try to extract from bureau checks
-                if ("maxEligibleEMI" not in data or not data.get("maxEligibleEMI")) and "bureauChecks" in data:
-                    bureau_checks = data["bureauChecks"]
-                    
-                    # Look for eligible EMI in bureau checks
-                    for check in bureau_checks:
-                        if isinstance(check, dict):
-                            # Check for direct EMI information
-                            if "eligibleEMI" in check:
-                                result["data"]["maxEligibleEMI"] = check["eligibleEMI"]
-                                break
-                            
-                            # Look in policy details
-                            if "policyCheck" in check and "EMI" in check["policyCheck"] and "value" in check:
-                                result["data"]["maxEligibleEMI"] = check["value"]
-                                break
+                # Format EMI plans
+                emi_plans = []
+                if "emiPlanList" in data:
+                    for plan in data["emiPlanList"]:
+                        formatted_plan = {
+                            "creditLimit": str(plan.get("creditLimit", 0)),
+                            "emi": str(plan.get("emi", 0)),
+                            "downPayment": str(plan.get("downPayment", 0)),
+                            "netLoanAmount": str(plan.get("netLoanAmount", 0)),
+                            "productDetails": plan.get("productDetailsDO", {})
+                        }
+                        emi_plans.append(formatted_plan)
                 
-                # Add plans to the result if they exist
-                if "emiPlans" in data and data["emiPlans"]:
-                    # Ensure the plans are properly formatted with amount values as strings
-                    formatted_plans = []
-                    for plan in data["emiPlans"]:
-                        formatted_plan = {}
-                        for key, value in plan.items():
-                            if key in ["creditLimit", "emi", "downPayment"] and value is not None:
-                                formatted_plan[key] = str(value)
-                            else:
-                                formatted_plan[key] = value
-                        formatted_plans.append(formatted_plan)
-                    
-                    result["data"]["emiPlans"] = formatted_plans
-                    
-                    # If we have plans but no max eligible EMI, use the highest EMI from plans
-                    if ("maxEligibleEMI" not in data or not data.get("maxEligibleEMI")) and formatted_plans:
-                        try:
-                            highest_emi = max(
-                                (float(plan["emi"]) for plan in formatted_plans if plan.get("emi") is not None),
-                                default=None
-                            )
-                            if highest_emi:
-                                result["data"]["maxEligibleEMI"] = str(int(highest_emi))
-                        except (ValueError, TypeError):
-                            logger.warning("Could not determine max eligible EMI from plans")
+                # Build standardized response
+                formatted_result = {
+                    "status": 200,
+                    "data": {
+                        "status": final_decision,
+                        "maxEligibleEMI": str(max_eligible_emi) if max_eligible_emi else None,
+                        "loanAmount": str(loan_amount) if loan_amount else None,
+                        "treatmentAmount": str(treatment_amount) if treatment_amount else None,
+                        "emiPlans": emi_plans,
+                        "reason": data.get("rejectionReasons", []),
+                        "incomeVerificationReasons": data.get("incomeVerificationReasons", []),
+                        "detailedChecks": data.get("detailedChecks", {})
+                    }
+                }
                 
-                # Make sure we have decision status
-                if "bureauDecision" in data and "status" not in data:
-                    result["data"]["status"] = data["bureauDecision"]
-                    
-                # Check for decision reason
-                if "reason" not in data and "bureauChecks" in data:
-                    for check in bureau_checks:
-                        if isinstance(check, dict) and check.get("autoDecision") == "FAILED":
-                            if "policyCheck" in check:
-                                result["data"]["reason"] = f"Failed {check['policyCheck']} check"
-                                break
+                return formatted_result
                 
-                logger.info(f"Enhanced bureau decision with eligible EMI info: {result['data']}")
             except Exception as e:
-                logger.warning(f"Error enhancing bureau decision: {e}")
+                logger.warning(f"Error formatting bureau decision: {e}")
+                return result
         
         return result
 
