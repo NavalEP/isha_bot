@@ -1305,7 +1305,7 @@ class CarepayAgent:
                 # Store the result in session for easy reference using update_session_data_field
                 if session_id:
                     self.update_session_data_field(session_id, "data.bureau_decision_details", bureau_result)
-                    logger.info(f"Stored bureau decision details in session: {bureau_result}")
+                    # logger.info(f"Stored bureau decision details in session: {bureau_result}")
                 
                 # Format the response using the new function
                 formatted_response = self._format_bureau_decision_response(bureau_result, session_id)
@@ -1411,8 +1411,8 @@ class CarepayAgent:
                     if key in plan and plan[key] is not None and not isinstance(plan[key], str):
                         plan[key] = str(plan[key])
             
-            # Log the complete details dictionary for debugging
-            logger.info(f"Extracted bureau decision details: {details}")
+            # # Log the complete details dictionary for debugging
+            # logger.info(f"Extracted bureau decision details: {details}")
             
             return details
         except Exception as e:
