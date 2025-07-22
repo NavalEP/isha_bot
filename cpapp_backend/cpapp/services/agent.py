@@ -1084,7 +1084,6 @@ class CarepayAgent:
         Get loan details by user ID
         
         Args:
-            user_id: User identifier, optional if available in session
             session_id: Session identifier
             
         Returns:
@@ -1309,6 +1308,12 @@ class CarepayAgent:
                 
                 # Format the response using the new function
                 formatted_response = self._format_bureau_decision_response(bureau_result, session_id)
+                logger.info(f"Formatted response: {formatted_response}")
+                
+                # Ensure we always return a string
+                if formatted_response is None:
+                    logger.error("Formatted response is None, returning default message")
+                    return "There was an error processing the loan decision. Please try again."
                 
                 return formatted_response
             
@@ -2775,6 +2780,7 @@ Continue your journey with the link here:
             
             # Get status from bureau decision
             status = bureau_decision.get("status")
+            logger.info(f"Bureau decision status: '{status}' (type: {type(status)})")
             
             # Format response based on status (case-insensitive)
             if status and status.upper() == "APPROVED":
@@ -2844,14 +2850,23 @@ What is the Employment Type of the patient?
 Please Enter input 1 or 2 only"""
             
             elif status and status.upper() == "REJECTED":
-                return f"""Dear {patient_name}! Your loan application is rejected from one lender and we try another lender give us more info so that we can try another lender
+                return f"""Dear {patient_name}! Your application is still not Approved. We need 5 more information so that we can check your eligibility for a loan application.
 What is the Employment Type of the patient?
 1. SALARIED
 2. SELF_EMPLOYED
 Please Enter input 1 or 2 only"""
             
-            elif status and status.upper() == "INCOME_VERIFICATION_REQUIRED":
-                return f"""Dear {patient_name}! Your application is still not Approved We need more 5 more info so that we will check your eligibility of loan Application
+            elif status and "income verification" in status.lower():
+                return f"""Dear {patient_name}! Your application is still not Approved. We need more 5 more info so that we will check your eligibility of loan Application
+What is the Employment Type of the patient?
+1. SALARIED
+2. SELF_EMPLOYED
+Please Enter input 1 or 2 only"""
+            
+            else:
+                # Default case for unknown status
+                logger.warning(f"Unknown bureau decision status: '{status}'")
+                return f"""Dear {patient_name}! We are processing your loan application. Please wait while we check your eligibility.
 What is the Employment Type of the patient?
 1. SALARIED
 2. SELF_EMPLOYED
