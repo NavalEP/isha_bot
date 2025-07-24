@@ -518,11 +518,12 @@ class CarepayAgent:
                 ai_message += "\n\nPlease respond with 'OK' to continue with additional information collection."
             
             # Check if this is the loan application decision with approval or income verification required
+            # Add status update for additional details collection when employment type is being asked
             if (("loan application has been **APPROVED**" in ai_message) or
-                "your applcation rejected from one lender and we try another lender give us more info so that we can try another lender" in ai_message or
-                "Your application is still not Approved We need more 5 more info so that we will check your eligibility of loan Application" in ai_message or
                 "what is the employment type of the patient?" in ai_message.lower() or
-                ("employment type" in ai_message.lower() and ("1. salaried" in ai_message.lower() or "2. self_employed" in ai_message.lower()))):
+                ("employment type" in ai_message.lower() and ("1. salaried" in ai_message.lower() or "2. self_employed" in ai_message.lower())) or
+                "Your application is still not Approved. We need 5 more information so that we can check your eligibility for a loan application." in ai_message or
+                "Your application is still not Approved. We need more 5 more info so that we will check your eligibility of loan Application" in ai_message):
                 # Mark session as collecting additional details
                 self.update_session_data_field(session_id, "status", "collecting_additional_details")
                 self.update_session_data_field(session_id, "data.collection_step", "employment_type")
@@ -709,12 +710,18 @@ class CarepayAgent:
                         logger.info(f"Successfully parsed JSON data and extracted clean userId: {user_id_from_api}")
                     except json.JSONDecodeError as e:
                         logger.warning(f"Could not parse 'data' field as JSON: {e}")
-                        # If JSON parsing fails, treat it as a direct userId string (first response format)
-                        if data and data.strip():
-                            user_id_from_api = data.strip()
-                            logger.info(f"Treating data as direct clean userId string: {user_id_from_api}")
+                        # Try to extract userId using regex as fallback for incomplete JSON
+                        userId_match = re.search(r'"userId"\s*:\s*"([^"]+)"', data)
+                        if userId_match:
+                            user_id_from_api = userId_match.group(1)
+                            logger.info(f"Extracted userId using regex fallback: {user_id_from_api}")
                         else:
-                            user_id_from_api = None
+                            # If regex also fails, treat it as a direct userId string (first response format)
+                            if data and data.strip():
+                                user_id_from_api = data.strip()
+                                logger.info(f"Treating data as direct clean userId string: {user_id_from_api}")
+                            else:
+                                user_id_from_api = None
                 elif isinstance(data, dict):
                     user_id_from_api = data.get("userId")
                     logger.info(f"Extracted userId from dict data: {user_id_from_api}")
@@ -917,62 +924,75 @@ class CarepayAgent:
     def save_basic_details(self, input_str: str, session_id: str) -> str:
         """
         Save basic user details
-        
+
         Args:
             input_str: JSON string with user details or user ID string
             session_id: Session identifier
-            
+
         Returns:
             Save result as JSON string
         """
         try:
+            user_id = None
+            data = {}
+
             # Check if input_str is just a user ID (not JSON)
             if input_str and input_str.strip() and not input_str.strip().startswith('{'):
                 user_id = input_str.strip()
-                data = {}
             else:
                 # Try to parse as JSON
                 data = json.loads(input_str)
-                user_id = data.pop("userId", None) or data.pop("user_id", None)
-                
-                # Extract fullName/name and phoneNumber/phone from input
-                if "fullName" in data:
-                    data["firstName"] = data.pop("fullName")
-                elif "name" in data:
-                    data["firstName"] = data.pop("name")
+                user_id = data.get("userId") or data.get("user_id")
 
-                if "phoneNumber" in data:
-                    data["mobileNumber"] = data.pop("phoneNumber")
-                elif "phone" in data:
-                    data["mobileNumber"] = data.pop("phone")
+                # Extract fullName/name and phoneNumber/phone from input (do not pop, just get)
+                if data.get("fullName"):
+                    data["firstName"] = data.get("fullName")
+                elif data.get("name"):
+                    data["firstName"] = data.get("name")
+
+                if data.get("phoneNumber"):
+                    data["mobileNumber"] = data.get("phoneNumber")
+                elif data.get("phone"):
+                    data["mobileNumber"] = data.get("phone")
                 else:
-                    return "Phone number is required"
+                    # Try to get phone from session if not present in input
+                    if session_id:
+                        session = self.get_session_from_db(session_id)
+                        if session and session.get("data", {}):
+                            session_data = session["data"]
+                            if session_data.get("mobileNumber"):
+                                data["mobileNumber"] = session_data.get("mobileNumber")
+                            elif session_data.get("phoneNumber"):
+                                data["mobileNumber"] = session_data.get("phoneNumber")
+                            elif session_data.get("phone"):
+                                data["mobileNumber"] = session_data.get("phone")
+                    if not data.get("mobileNumber"):
+                        return "Phone number is required"
 
-            
             # Ensure we have a valid user ID
             if not user_id:
                 # Try to get user ID from session if not provided in input
                 if session_id:
                     session = self.get_session_from_db(session_id)
                     if session and session.get("data", {}).get("userId"):
-                        user_id = session["data"]["userId"]
-                
+                        user_id = session["data"].get("userId")
+
             if not user_id:
                 return "User ID is required"
-            
+
             # Store the data being sent to the API
             if session_id:
                 self.update_session_data_field(session_id, "data.api_requests.save_basic_details", {
                     "user_id": user_id,
                     "data": data.copy()
                 })
-                
+
             result = self.api_client.save_basic_details(user_id, data)
-            
+
             # Store the API response
             if session_id:
                 self.update_session_data_field(session_id, "data.api_responses.save_basic_details", result)
-            
+
             return json.dumps(result)
         except Exception as e:
             logger.error(f"Error saving basic details: {e}")
