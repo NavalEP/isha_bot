@@ -696,31 +696,52 @@ class CarepayAgent:
                 self.update_session_data_field(session_id, "data.api_responses.get_user_id_from_phone_number", result)
             
             # If successful, extract userId and store in session
-            if result.get("status") == 200 and session_id:
+            if result.get("status") == 200:
                 # Parse the data field if it's a JSON string
                 data = result.get("data")
+                user_id_from_api = None
+                
                 if isinstance(data, str):
+                    # First, try to parse as JSON (for the second response format with userId and prefill_data)
                     try:
                         parsed_data = json.loads(data)
                         user_id_from_api = parsed_data.get("userId")
-                    except json.JSONDecodeError:
-                        user_id_from_api = data
+                        logger.info(f"Successfully parsed JSON data and extracted clean userId: {user_id_from_api}")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Could not parse 'data' field as JSON: {e}")
+                        # If JSON parsing fails, treat it as a direct userId string (first response format)
+                        if data and data.strip():
+                            user_id_from_api = data.strip()
+                            logger.info(f"Treating data as direct clean userId string: {user_id_from_api}")
+                        else:
+                            user_id_from_api = None
+                elif isinstance(data, dict):
+                    user_id_from_api = data.get("userId")
+                    logger.info(f"Extracted userId from dict data: {user_id_from_api}")
                 else:
-                    user_id_from_api = data
+                    user_id_from_api = None
+                    logger.warning(f"Unexpected data type: {type(data).__name__}")
                 
-                # Ensure extracted_user_id is a non-empty string
+                # Ensure extracted_user_id is a non-empty string and validate it's a clean userId
                 if isinstance(user_id_from_api, str) and user_id_from_api:
-                    # Store userId in session.data.userId as per instruction
-                    self.update_session_data_field(session_id, "data.userId", user_id_from_api)
-                    logger.info(f"Stored userId '{user_id_from_api}' in session data for session {session_id}")
-                else:
+                    # Additional validation to ensure we never save a JSON string as userId
+                    if user_id_from_api.startswith('{') or user_id_from_api.startswith('"'):
+                        logger.error(f"Attempted to save JSON string as userId: {user_id_from_api}")
+                        user_id_from_api = None
+                    else:
+                        if session_id:
+                            # Store clean userId in session.data.userId
+                            self.update_session_data_field(session_id, "data.userId", user_id_from_api)
+                            logger.info(f"Stored clean userId '{user_id_from_api}' in session data for session {session_id}")
+                
+                if not user_id_from_api:
                     logger.warning(
-                        f"UserId not found or is not a string in API response's 'data' field. "
-                        f"Received: '{user_id_from_api}' (type: {type(user_id_from_api).__name__}) "
+                        f"UserId not found or is not a valid string in API response's 'data' field. "
+                        f"Received: '{data}' (type: {type(data).__name__}) "
                         f"for session {session_id}."
                     )
             
-            return user_id_from_api
+            return user_id_from_api if user_id_from_api else "userId not found in API response"
         except Exception as e:
             logger.error(f"Error getting user ID from phone number: {e}")
             return f"Error getting user ID from phone number: {str(e)}"

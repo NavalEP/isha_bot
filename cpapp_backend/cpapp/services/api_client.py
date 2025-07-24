@@ -524,3 +524,33 @@ class CarepayAPIClient:
         }
         logger.info(f"Logging in doctor with code: {doctor_code}")
         return self._make_request('GET', endpoint, params=params)
+
+    def get_surepass_bureau_report(self, user_id: str) -> Dict[str, Any]:
+        """
+        Get SurePass bureau report for a user.
+        Corresponds to API: /surePassBureau
+
+        Args:
+            user_id: The ID of the user to get bureau report for.
+
+        Returns:
+            API response containing bureau report data with the following structure:
+            {
+                "status": 200,
+                "data": {
+                    "id": null,
+                    "userId": "user_id",
+                    "type": "NTC",
+                    "addedOn": timestamp,
+                    "data": "JSON string with credit information",
+                    "creditScore": null,
+                    "bureauDataUrl": "PDF download URL"
+                },
+                "attachment": null,
+                "message": "success"
+            }
+        """
+        endpoint = "surePassBureau"
+        params = {"userId": user_id}
+        logger.info(f"Getting SurePass bureau report for userId: {user_id}")
+        return self._make_request('GET', endpoint, params=params)
