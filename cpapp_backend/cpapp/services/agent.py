@@ -150,8 +150,6 @@ class CarepayAgent:
 
         10. Process Loan Application:
            - didn't miss this step
-           - call get_loan_details tool using session_id as input
-           - Use get_bureau_report tool with session_id to check if the bureau report API call is successful (this tool only returns API status, not the full report)
            - Use get_bureau_decision tool to get final loan decision using session_id
            - IMMEDIATELY proceed to step 10 after completion
 
@@ -493,16 +491,12 @@ class CarepayAgent:
                     # Log each step with its tool name
                     logger.info(f"Step {i+1}: Tool: {action.tool}")
                     
-                    # Special handling for bureau report to ensure it's visible
-                    if action.tool == "get_bureau_report":
-                        logger.info(f"Bureau Report Status: {action_output}")
+                    # Truncate outputs if they're too long
+                    output_str = str(action_output)
+                    if len(output_str) > 1000:
+                        logger.info(f"Tool Output (truncated): {output_str[:1000]}...")
                     else:
-                        # Truncate other outputs if they're too long
-                        output_str = str(action_output)
-                        if len(output_str) > 1000:
-                            logger.info(f"Tool Output (truncated): {output_str[:1000]}...")
-                        else:
-                            logger.info(f"Tool Output: {output_str}")
+                        logger.info(f"Tool Output: {output_str}")
             
             # Extract LLM response and add to history
             ai_message = response.get("output", "I don't know how to respond to that.")
@@ -1152,131 +1146,7 @@ class CarepayAgent:
             logger.error(f"Error saving loan details: {e}")
             return f"Error saving loan details: {str(e)}"
     
-    def get_loan_details(self, session_id: str = None) -> str:
-        """
-        Get loan details by user ID
-        
-        Args:
-            session_id: Session identifier
-            
-        Returns:
-            Loan details as JSON string
-        """
-        try:
-            # If user_id is not provided, try to get from session
-            if not user_id and session_id:
-                session = self.get_session_from_db(session_id)
-                if session and session.get("data", {}).get("userId"):
-                    user_id = session["data"]["userId"]
-                    
-            if not user_id:
-                return "User ID is required to get loan details"
-                
-            result = self.api_client.get_loan_details_by_user_id(user_id)
-            
-            # Store the complete API response in session data
-            if session_id:
-                self.update_session_data_field(session_id, "data.api_responses.get_loan_details", result)
-            
-            # If successful, extract loanId and store in session for future use
-            if result.get("status") == 200 and session_id:
-                data = result.get("data", {})
-                if isinstance(data, dict) and "loanId" in data:
-                    loan_id = data["loanId"]
-                    self.update_session_data_field(session_id, "data.loanId", loan_id)
-                    logger.info(f"Stored loanId {loan_id} in session {session_id}")
-            
-            return json.dumps(result)
-        except Exception as e:
-            logger.error(f"Error getting loan details: {e}")
-            return f"Error getting loan details: {str(e)}"
-    
-    def get_bureau_report(self, session_id: str = None) -> str:
-        """
-        Get bureau report for a loan
-        
-        Args:
-            session_id: Session identifier
-            
-        Returns:
-            Bureau report status as JSON string
-        """
-        try:
-            # Initialize loan_id
-            loan_id = None
-            
-            # First try to get loan_id from session data
-            if session_id:
-                session = self.get_session_from_db(session_id)
-                if session and "data" in session:
-                    session_data = session["data"]
-                    
-                    # Check if we already have bureau report in session
-                    if "api_responses" in session_data and "get_bureau_report" in session_data["api_responses"]:
-                        existing_report = session_data["api_responses"]["get_bureau_report"]
-                        if existing_report.get("status") == 200:
-                            logger.info(f"Using existing bureau report from session")
-                            return json.dumps(existing_report)
-                    
-                    # Try to get loan_id from different possible locations in session data
-                    if "loanId" in session_data:
-                        loan_id = session_data["loanId"]
-                    elif "api_responses" in session_data and "get_loan_details" in session_data["api_responses"]:
-                        loan_details = session_data["api_responses"]["get_loan_details"]
-                        if loan_details.get("status") == 200 and "data" in loan_details:
-                            loan_id = loan_details["data"].get("loanId")
-                    
-                    # Also try to get from save_loan_details response
-                    if not loan_id and "api_responses" in session_data and "save_loan_details" in session_data["api_responses"]:
-                        save_loan_response = session_data["api_responses"]["save_loan_details"]
-                        if isinstance(save_loan_response, dict) and save_loan_response.get("status") == 200:
-                            if "data" in save_loan_response and isinstance(save_loan_response["data"], dict):
-                                loan_id = save_loan_response["data"].get("loanId")
-            
-            if not loan_id:
-                return json.dumps({"status": 400, "error": "Loan ID is required to get bureau report"})
-            
-            logger.info(f"Requesting bureau report for loan ID: {loan_id}")    
-            result = self.api_client.get_experian_bureau_report(loan_id)
-            
-            # Store the complete API response in session data
-            if session_id:
-                self.update_session_data_field(session_id, "data.api_responses.get_bureau_report", result)
-            
-            # Create a truncated version of the result with only essential information
-            truncated_result = {
-                "status": result.get("status"),
-                "message": "Bureau report retrieved successfully" if result.get("status") == 200 else "Error retrieving bureau report"
-            }
-            
-            # Store the bureau report status and retrieval flag in session
-            if session_id:
-                self.update_session_data_field(session_id, "data.bureau_report_status", truncated_result)
-                self.update_session_data_field(session_id, "data.bureau_report_retrieved", (result.get("status") == 200))
-                logger.info(f"Stored bureau report status in session for loan ID: {loan_id}")
-            
-            # Enhanced logging to ensure visibility
-            logger.info(f"Bureau Report Response - Status: {result.get('status')}")
-            
-            # Log some additional info but don't include in response
-            if result.get("status") == 200:
-                logger.info("Bureau report retrieved successfully")
-                # Log some key parts from the data if present (truncated for readability)
-                if "data" in result:
-                    data_keys = list(result["data"].keys()) if isinstance(result["data"], dict) else "Not a dictionary"
-                    logger.info(f"Bureau report data keys: {data_keys}")
-            else:
-                # Log error details
-                logger.error(f"Bureau report error: {result.get('error', 'Unknown error')}")
-                
-            # Return only the truncated result to avoid token limit issues
-            return json.dumps(truncated_result)
-        except Exception as e:
-            logger.error(f"Error getting bureau report: {e}")
-            return json.dumps({
-                "status": 500,
-                "message": f"Error getting bureau report: {str(e)}"
-            })
+
     
     def get_bureau_decision(self, session_id: str) -> str:
         """
@@ -1312,12 +1182,7 @@ class CarepayAgent:
                     if "loanId" in session_data:
                         loan_id = session_data["loanId"]
                         logger.info(f"Found loan_id in session data: {loan_id}")
-                    elif "api_responses" in session_data and "get_loan_details" in session_data["api_responses"]:
-                        loan_details = session_data["api_responses"]["get_loan_details"]
-                        logger.info(f"get_loan_details response: {loan_details}")
-                        if loan_details.get("status") == 200 and "data" in loan_details:
-                            loan_id = loan_details["data"].get("loanId")
-                            logger.info(f"Found loan_id in get_loan_details response: {loan_id}")
+
                     
                     # Also try to get from save_loan_details response
                     if not loan_id and "api_responses" in session_data and "save_loan_details" in session_data["api_responses"]:
@@ -2586,16 +2451,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                 description="Save user's employment details",
             ),
             
-            Tool(
-                name="get_loan_details",
-                func=lambda session_id: self.get_loan_details(session_id),
-                description="Get loan details for a user using session_id as input",
-            ),
-            Tool(
-                name="get_bureau_report",
-                func=lambda session_id: self.get_bureau_report(session_id),
-                description="Get bureau report for a loan using session_id as input",
-            ),
+
             Tool(
                 name="get_bureau_decision",
                 func=lambda session_id: self.get_bureau_decision(session_id),
