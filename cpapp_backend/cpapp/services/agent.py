@@ -957,74 +957,73 @@ class CarepayAgent:
     
     def save_basic_details(self, input_str: str, session_id: str) -> str:
         """
-        Save basic user details
+        Save basic user details, always prioritizing session data over input_str.
 
         Args:
-            input_str: JSON string with user details or user ID string
+            input_str: (ignored, always use session data)
             session_id: Session identifier
 
         Returns:
             Save result as JSON string
         """
         try:
-            user_id = None
-            data = {}
+            # Always use session data, ignore input_str
+            if not session_id:
+                return "Session ID is required"
 
-            # Check if input_str is just a user ID (not JSON)
-            if input_str and input_str.strip() and not input_str.strip().startswith('{'):
-                user_id = input_str.strip()
-            else:
-                # Try to parse as JSON
-                data = json.loads(input_str)
-                user_id = data.get("userId") or data.get("user_id")
+            session = self.get_session_from_db(session_id)
+            if not session or not session.get("data", {}):
+                return "Session data not found"
 
-                # Extract fullName/name and phoneNumber/phone from input (do not pop, just get)
-                if data.get("fullName"):
-                    data["firstName"] = data.get("fullName")
-                elif data.get("name"):
-                    data["firstName"] = data.get("name")
+            session_data = session["data"]
 
-                if data.get("phoneNumber"):
-                    data["mobileNumber"] = data.get("phoneNumber")
-                elif data.get("phone"):
-                    data["mobileNumber"] = data.get("phone")
-                else:
-                    # Try to get phone from session if not present in input
-                    if session_id:
-                        session = self.get_session_from_db(session_id)
-                        if session and session.get("data", {}):
-                            session_data = session["data"]
-                            if session_data.get("mobileNumber"):
-                                data["mobileNumber"] = session_data.get("mobileNumber")
-                            elif session_data.get("phoneNumber"):
-                                data["mobileNumber"] = session_data.get("phoneNumber")
-                            elif session_data.get("phone"):
-                                data["mobileNumber"] = session_data.get("phone")
-                    if not data.get("mobileNumber"):
-                        return "Phone number is required"
-
-            # Ensure we have a valid user ID
-            if not user_id:
-                if session_id:
-                    session = self.get_session_from_db(session_id)
-                    if session and session.get("data", {}).get("userId"):
-                        user_id = session["data"].get("userId")
-
+            # Get userId from session data
+            user_id = session_data.get("userId")
             if not user_id:
                 return "User ID is required"
 
+            # Build data dict from session data, mapping to expected API fields
+            data = {}
+
+            # Name fields
+            if session_data.get("fullName"):
+                data["firstName"] = session_data.get("fullName")
+            elif session_data.get("name"):
+                data["firstName"] = session_data.get("name")
+
+            # Phone number fields
+            if session_data.get("mobileNumber"):
+                data["mobileNumber"] = session_data.get("mobileNumber")
+            elif session_data.get("phoneNumber"):
+                data["mobileNumber"] = session_data.get("phoneNumber")
+            elif session_data.get("phone"):
+                data["mobileNumber"] = session_data.get("phone")
+            else:
+                return "Phone number is required"
+
+            # Add other possible fields from session data if present
+            for field in ["panCard", "pan", "panNo", "gender", "dateOfBirth", "dob", "emailId", "email", "treatmentCost", "monthlyIncome"]:
+                if session_data.get(field) is not None:
+                    # Map to expected API keys if needed
+                    if field in ["pan", "panNo"]:
+                        data["panCard"] = session_data.get(field)
+                    elif field == "dob":
+                        data["dateOfBirth"] = session_data.get(field)
+                    elif field == "email":
+                        data["emailId"] = session_data.get(field)
+                    else:
+                        data[field] = session_data.get(field)
+
             # Store the data being sent to the API
-            if session_id:
-                self.update_session_data_field(session_id, "data.api_requests.save_basic_details", {
-                    "user_id": user_id,
-                    "data": data.copy()
-                })
+            self.update_session_data_field(session_id, "data.api_requests.save_basic_details", {
+                "user_id": user_id,
+                "data": data.copy()
+            })
 
             result = self.api_client.save_basic_details(user_id, data)
 
             # Store the API response
-            if session_id:
-                self.update_session_data_field(session_id, "data.api_responses.save_basic_details", result)
+            self.update_session_data_field(session_id, "data.api_responses.save_basic_details", result)
 
             return json.dumps(result)
         except Exception as e:
