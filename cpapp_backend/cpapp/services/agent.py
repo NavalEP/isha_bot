@@ -507,8 +507,42 @@ class CarepayAgent:
             # Extract LLM response and add to history
             ai_message = response.get("output", "I don't know how to respond to that.")
             
-            # Check if this is a bureau decision response
-            if "bureau decision" in ai_message.lower() and any(plan in ai_message for plan in ["Plan:", "Plan", "EMI:", "/0", "/5", "/1"]):
+            # Check if any tool returned a formatted bureau decision response
+            formatted_response_found = False
+            if "intermediate_steps" in response:
+                for step in response["intermediate_steps"]:
+                    action = step[0]
+                    action_output = step[1]
+                    
+                    # Check if this is a bureau decision tool that returned a formatted response
+                    if action.tool == "get_bureau_decision":
+                        # Check if the output contains the formatted response patterns
+                        if (("loan application has been **APPROVED**" in str(action_output)) or
+                            "what is the employment type of the patient?" in str(action_output).lower() or
+                            ("employment type" in str(action_output).lower() and ("1. salaried" in str(action_output).lower() or "2. self_employed" in str(action_output).lower())) or
+                            "Your application is still not Approved. We need 5 more information so that we can check your eligibility for a loan application." in str(action_output) or
+                            "Your application is still not Approved. We need more 5 more info so that we will check your eligibility of loan Application" in str(action_output)):
+                            
+                            # Use the tool's formatted response directly instead of the LLM's response
+                            ai_message = str(action_output)
+                            formatted_response_found = True
+                            logger.info(f"Session {session_id}: Using formatted response from get_bureau_decision tool")
+                            break
+                    
+                    # Check if this is a check_jp_cardless tool that returned a formatted response
+                    elif action.tool == "check_jp_cardless":
+                        # Check if the output contains the formatted response patterns for Juspay Cardless
+                        if ("loan application has been **APPROVED** for Juspay Cardless" in str(action_output) or
+                            "Continue your journey with the link here:" in str(action_output)):
+                            
+                            # Use the tool's formatted response directly instead of the LLM's response
+                            ai_message = str(action_output)
+                            formatted_response_found = True
+                            logger.info(f"Session {session_id}: Using formatted response from check_jp_cardless tool")
+                            break
+            
+            # Check if this is a bureau decision response (fallback check)
+            if not formatted_response_found and "bureau decision" in ai_message.lower() and any(plan in ai_message for plan in ["Plan:", "Plan", "EMI:", "/0", "/5", "/1"]):
                 # Mark as decision sent (but we'll proceed directly to additional data collection)
                 self.update_session_data_field(session_id, "status", "bureau_decision_sent")
                 logger.info(f"Session {session_id} marked as bureau_decision_sent")
@@ -971,7 +1005,6 @@ class CarepayAgent:
 
             # Ensure we have a valid user ID
             if not user_id:
-                # Try to get user ID from session if not provided in input
                 if session_id:
                     session = self.get_session_from_db(session_id)
                     if session and session.get("data", {}).get("userId"):
