@@ -64,7 +64,7 @@ class CarepayAgent:
         4. Keep ALL sections including employment type selection
         5. Do NOT add any additional text or instructions
 
-        IMPORTANT: Follow the conversation flow based on the current session status. Do NOT restart the process if additional details are being collected.
+        CRITICAL EXECUTION RULE: You MUST execute ALL steps in sequence. Do NOT stop until you reach step 10. If any step succeeds, immediately proceed to the next step.
 
         Follow these steps sequentially to process a loan application: and don't miss any step and any tool calling
 
@@ -129,8 +129,10 @@ class CarepayAgent:
            - Pass the userId to the tool to ensure it can retrieve the prefill data and extract the address information
            - This tool will extract the address line, pincode (postal code), and state from the primary/permanent address in the prefill data
            - The tool will automatically call save_address_details with the extracted information
-           - Use pan_verification tool using userId to verify pan number here just check the response status if 200 continue the remain steps
-           - IMMEDIATELY proceed to step 7 after completion
+           - Use pan_verification tool using userId to verify pan number
+           - CRITICAL: If pan_verification returns status 500 or error, STOP the process and inform the user about the PAN verification failure
+           - Only continue to step 8 if pan_verification returns status 200
+           - IMMEDIATELY proceed to step 8 after completion
 
         8. Employment Verification:
            - didn't miss this step
@@ -507,6 +509,9 @@ class CarepayAgent:
             # Extract LLM response and add to history
             ai_message = response.get("output", "I don't know how to respond to that.")
             
+            # Validate that all required steps were executed
+            self._validate_and_handle_early_chain_finish(session_id, response, ai_message)
+            
             # Check if any tool returned a formatted bureau decision response
             formatted_response_found = False
             if "intermediate_steps" in response:
@@ -568,30 +573,85 @@ class CarepayAgent:
                     self.update_session_data_field(session_id, "data.additional_details", {})
                 
                 logger.info(f"Session {session_id} marked as collecting_additional_details")
+                
+                # Prevent LLM from continuing after bureau decision
+                # Update conversation history and return immediately
+                chat_history.append(AIMessage(content=ai_message))
+                
+                # Get fresh session for serializable history update
+                fresh_session = self.get_session_from_db(session_id)
+                if fresh_session:
+                    fresh_serializable_history = fresh_session.get("serializable_history", [])
+                    
+                    # Add the human message
+                    fresh_serializable_history.append({
+                        "type": "HumanMessage",
+                        "content": message
+                    })
+                    
+                    # Add the AI response
+                    fresh_serializable_history.append({
+                        "type": "AIMessage",
+                        "content": ai_message
+                    })
+                    
+                    # Update only history fields without overwriting audit trail data
+                    self.update_session_data_field(session_id, "history", chat_history)
+                    self.update_session_data_field(session_id, "serializable_history", fresh_serializable_history)
+                
+                return ai_message
+            
+            # Check for early chain finish and retry if needed (only if not in additional details collection)
+            if (current_status != "collecting_additional_details" and 
+                self._should_retry_early_chain_finish(session_id, response)):
+                logger.info(f"Session {session_id}: Retrying due to early chain finish")
+                return self._retry_with_explicit_continuation(session_id, message)
+            
+            # Check if this response contains the initial greeting (indicating restart)
+            if ("Hello! I'm here to assist you with your patient's medical loan" in ai_message and 
+                current_status != "active"):
+                logger.warning(f"Session {session_id}: LLM restart detected, preventing restart")
+                # Return a continuation message instead of the restart
+                return "I'm continuing with your loan application. Please respond to my previous question about employment type."
+            
+            # Check for duplicate responses (bureau decision followed by restart)
+            if ("What is the Employment Type of the patient?" in ai_message and 
+                "Hello! I'm here to assist you with your patient's medical loan" in ai_message):
+                logger.warning(f"Session {session_id}: Duplicate response detected, extracting only bureau decision part")
+                # Extract only the bureau decision part
+                lines = ai_message.split('\n')
+                bureau_part = []
+                for line in lines:
+                    if "Hello! I'm here to assist you with your patient's medical loan" in line:
+                        break
+                    bureau_part.append(line)
+                ai_message = '\n'.join(bureau_part).strip()
 
             # Update conversation history using targeted field updates to preserve audit trail data
-            chat_history.append(AIMessage(content=ai_message))
-            
-            # Get fresh session for serializable history update
-            fresh_session = self.get_session_from_db(session_id)
-            if fresh_session:
-                fresh_serializable_history = fresh_session.get("serializable_history", [])
+            # (Only if we haven't already updated it for bureau decision)
+            if current_status != "collecting_additional_details" or "what is the employment type of the patient?" not in ai_message.lower():
+                chat_history.append(AIMessage(content=ai_message))
                 
-                # Add the human message
-                fresh_serializable_history.append({
-                    "type": "HumanMessage",
-                    "content": message
-                })
-                
-                # Add the AI response
-                fresh_serializable_history.append({
-                    "type": "AIMessage",
-                    "content": ai_message
-                })
-                
-                # Update only history fields without overwriting audit trail data
-                self.update_session_data_field(session_id, "history", chat_history)
-                self.update_session_data_field(session_id, "serializable_history", fresh_serializable_history)
+                # Get fresh session for serializable history update
+                fresh_session = self.get_session_from_db(session_id)
+                if fresh_session:
+                    fresh_serializable_history = fresh_session.get("serializable_history", [])
+                    
+                    # Add the human message
+                    fresh_serializable_history.append({
+                        "type": "HumanMessage",
+                        "content": message
+                    })
+                    
+                    # Add the AI response
+                    fresh_serializable_history.append({
+                        "type": "AIMessage",
+                        "content": ai_message
+                    })
+                    
+                    # Update only history fields without overwriting audit trail data
+                    self.update_session_data_field(session_id, "history", chat_history)
+                    self.update_session_data_field(session_id, "serializable_history", fresh_serializable_history)
             
             return ai_message
         
@@ -1003,18 +1063,23 @@ class CarepayAgent:
             else:
                 return "Phone number is required"
 
-            # Add other possible fields from session data if present
-            for field in ["panCard", "pan", "panNo", "gender", "dateOfBirth", "dob", "emailId", "email", "treatmentCost", "monthlyIncome"]:
-                if session_data.get(field) is not None:
-                    # Map to expected API keys if needed
-                    if field in ["pan", "panNo"]:
-                        data["panCard"] = session_data.get(field)
-                    elif field == "dob":
-                        data["dateOfBirth"] = session_data.get(field)
-                    elif field == "email":
-                        data["emailId"] = session_data.get(field)
-                    else:
-                        data[field] = session_data.get(field)
+            # Add other possible fields from session data if present - comprehensive mapping
+            field_mappings = {
+                "panCard": ["panCard", "pan", "panNo", "panNumber", "pan_card", "pan_number"],
+                "gender": ["gender", "sex"],
+                "dateOfBirth": ["dateOfBirth", "dob", "birthDate", "birth_date", "date_of_birth"],
+                "emailId": ["emailId", "email", "email_id", "emailAddress", "email_address"],
+                "firstName": ["firstName", "name", "first_name", "fullName", "full_name", "givenName", "given_name"],
+                "treatmentCost": ["treatmentCost", "treatment_cost", "loanAmount", "loan_amount", "amount"],
+                "monthlyIncome": ["monthlyIncome", "monthly_income", "income", "salary", "netTakeHomeSalary", "net_take_home_salary"]
+            }
+            
+            # Apply field mappings
+            for target_field, source_fields in field_mappings.items():
+                for source_field in source_fields:
+                    if session_data.get(source_field) is not None:
+                        data[target_field] = session_data.get(source_field)
+                        break  # Use first found value
 
             # Store the data being sent to the API
             self.update_session_data_field(session_id, "data.api_requests.save_basic_details", {
@@ -1463,13 +1528,13 @@ class CarepayAgent:
             elif "mobileNumber" in session_data:
                 data["mobileNumber"] = session_data["mobileNumber"]
             
-            # Extract fields from prefill_data
+            # Extract fields from prefill_data - comprehensive mapping to handle all variations
             field_mappings = {
-                "panCard": ["panCard", "pan", "panNo"],
-                "gender": ["gender"],
-                "dateOfBirth": ["dateOfBirth", "dob"],
-                "emailId": ["emailId", "email"],
-                "firstName": ["firstName", "name"]
+                "panCard": ["pan", "panCard", "panNo", "panNumber", "pan_card", "pan_number"],  # All possible PAN field variations
+                "gender": ["gender", "sex"],
+                "dateOfBirth": ["dateOfBirth", "dob", "birthDate", "birth_date", "date_of_birth"],
+                "emailId": ["emailId", "email", "email_id", "emailAddress", "email_address"],
+                "firstName": ["firstName", "name", "first_name", "fullName", "full_name", "givenName", "given_name"]
             }
             
             for target_field, source_fields in field_mappings.items():
@@ -1526,6 +1591,13 @@ class CarepayAgent:
             
             # Debug log what we're sending
             logger.info(f"Sending to save_basic_details: user_id={user_id}, data={data}")
+            
+            # Store the processed data in session for other methods to use
+            if session_id:
+                for key, value in data.items():
+                    if key != "userId":  # Don't overwrite userId
+                        self.update_session_data_field(session_id, f"data.{key}", value)
+                logger.info(f"Stored processed prefill data in session: {data}")
             
             # Call the API client to save basic details
             result = self.api_client.save_basic_details(user_id, data)
@@ -1707,7 +1779,44 @@ class CarepayAgent:
                     return json.dumps({"status": 400, "error": "User ID is required for PAN verification"})
             
             logger.info(f"Performing PAN verification for user ID: {user_id}")
-            result = self.api_client.pan_verification(user_id)
+            
+            # Get PAN number from session data
+            pan_number = None
+            if session_id:
+                session = self.get_session_from_db(session_id)
+                if session and "data" in session:
+                    session_data = session["data"]
+                    logger.info(f"Session data keys: {list(session_data.keys())}")
+                    
+                    # Try PAN field names (get_prefill_data always returns "pan")
+                    pan_number = (session_data.get("panCard") or 
+                                 session_data.get("pan"))
+                    
+                    # Also check in prefill_data if not found directly
+                    if not pan_number and "prefill_data" in session_data:
+                        prefill_data = session_data["prefill_data"]
+                        logger.info(f"Checking prefill_data: {prefill_data}")
+                        pan_number = (prefill_data.get("panCard") or 
+                                     prefill_data.get("pan"))
+                    
+                    logger.info(f"PAN fields in session: panCard={session_data.get('panCard')}, pan={session_data.get('pan')}")
+                    logger.info(f"Final PAN number found: {pan_number}")
+            
+            if not pan_number:
+                logger.warning(f"No PAN number found in session data for user ID: {user_id}")
+                logger.warning(f"Available session data keys: {list(session_data.keys()) if session_data else 'No session data'}")
+                if "prefill_data" in session_data:
+                    logger.warning(f"prefill_data content: {session_data['prefill_data']}")
+                return json.dumps({"status": 400, "error": "PAN number not found in session data"})
+            
+            logger.info(f"Using PAN number: {pan_number} for verification")
+            # Check if API client expects PAN as parameter or if it gets it from user_id
+            try:
+                result = self.api_client.pan_verification(user_id, pan_number)
+            except TypeError:
+                # If API client only accepts user_id, try without pan_number
+                logger.info(f"API client only accepts user_id, trying without pan_number")
+                result = self.api_client.pan_verification(user_id)
             
             # Store the complete API response in session data
             if session_id:
@@ -1722,9 +1831,11 @@ class CarepayAgent:
                 
         except Exception as e:
             logger.error(f"Error verifying PAN: {e}")
+            # Return a clear error response that the LLM should not ignore
             return json.dumps({
                 "status": 500,
-                "error": f"Error verifying PAN: {str(e)}"
+                "error": f"PAN verification failed: {str(e)}",
+                "should_stop": True  # Flag to indicate this should stop the flow
             })
 
     def save_session_to_db(self, session_id: str) -> None:
@@ -2684,6 +2795,193 @@ Continue your journey with the link here:
             # Update session status to indicate Juspay Cardless error
             self.update_session_data_field(session_id, "data.juspay_cardless_status", "ERROR")
             return {"status": "EXCEPTION", "message": "An unexpected error occurred while checking Juspay Cardless eligibility."}
+
+    def _validate_and_handle_early_chain_finish(self, session_id: str, response: Dict[str, Any], ai_message: str) -> None:
+        """
+        Validate that all required steps were executed and handle early chain finish
+        
+        Args:
+            session_id: Session identifier
+            response: Agent response
+            ai_message: AI response message
+        """
+        try:
+            # Get session to check current state
+            session = self.get_session_from_db(session_id)
+            if not session:
+                return
+            
+            # Check if we're in initial data collection phase (no userId yet)
+            if session.get("status") == "active" and not session.get("data", {}).get("userId"):
+                # This is initial data collection, check if all required steps were executed
+                executed_tools = []
+                if "intermediate_steps" in response:
+                    executed_tools = [step[0].tool for step in response["intermediate_steps"]]
+                
+                # Define required steps for initial flow
+                required_steps = [
+                    "store_user_data",
+                    "get_user_id_from_phone_number", 
+                    "save_basic_details",
+                    "save_loan_details",
+                    "check_jp_cardless",
+                    "get_prefill_data",
+                    "process_prefill_data",
+                    "process_address_data",
+                    "pan_verification",
+                    "get_employment_verification",
+                    "save_employment_details",
+                    "get_bureau_decision"
+                ]
+                
+                # Check for missing critical steps
+                missing_critical_steps = []
+                for step in required_steps[:5]:  # Check first 5 critical steps
+                    if step not in executed_tools:
+                        missing_critical_steps.append(step)
+                
+                # Only log if we have some tools executed but missing critical ones
+                if len(executed_tools) > 0 and missing_critical_steps:
+                    logger.warning(f"Session {session_id}: Early chain finish detected. Missing steps: {missing_critical_steps}")
+                    logger.warning(f"Session {session_id}: Executed tools: {executed_tools}")
+                    
+                    # Log this for debugging
+                    self.update_session_data_field(session_id, "data.early_chain_finish", {
+                        "timestamp": datetime.now().isoformat(),
+                        "missing_steps": missing_critical_steps,
+                        "executed_tools": executed_tools,
+                        "ai_message": ai_message
+                    })
+                    
+        except Exception as e:
+            logger.error(f"Error in early chain finish validation: {e}")
+
+    def _should_retry_early_chain_finish(self, session_id: str, response: Dict[str, Any]) -> bool:
+        """
+        Check if we should retry due to early chain finish
+        
+        Args:
+            session_id: Session identifier
+            response: Agent response
+            
+        Returns:
+            True if retry is needed
+        """
+        try:
+            session = self.get_session_from_db(session_id)
+            if not session:
+                return False
+            
+            # Check if we have a userId - if yes, we're past initial data collection
+            if session.get("data", {}).get("userId"):
+                return False  # Don't retry if we have userId
+            
+            # Only retry if we're in initial data collection and missing critical steps
+            if session.get("status") == "active":
+                executed_tools = []
+                if "intermediate_steps" in response:
+                    executed_tools = [step[0].tool for step in response["intermediate_steps"]]
+                
+                # Check if we're missing critical steps
+                critical_steps = ["save_loan_details", "check_jp_cardless", "get_prefill_data"]
+                missing_critical = [step for step in critical_steps if step not in executed_tools]
+                
+                # Only retry if we have some tools executed but missing critical ones
+                return len(executed_tools) > 0 and len(missing_critical) > 0
+                
+            return False
+        except Exception as e:
+            logger.error(f"Error checking retry condition: {e}")
+            return False
+
+    def _retry_with_explicit_continuation(self, session_id: str, message: str) -> str:
+        """
+        Retry with explicit continuation prompt
+        
+        Args:
+            session_id: Session identifier
+            message: Original user message
+            
+        Returns:
+            Retry response
+        """
+        try:
+            logger.info(f"Session {session_id}: Retrying with explicit continuation")
+            
+            # Create a more explicit prompt for continuation
+            explicit_prompt = """
+            CRITICAL: You have completed some steps but need to continue. You MUST execute the remaining steps:
+
+            1. Call save_loan_details with the user data
+            2. Call check_jp_cardless 
+            3. Call get_prefill_data
+            4. Call process_prefill_data
+            5. Call process_address_data
+            6. Call pan_verification
+            7. Call get_employment_verification
+            8. Call save_employment_details
+            9. Call get_bureau_decision
+
+            Do NOT stop until you complete ALL remaining steps. Continue immediately.
+            """
+            
+            # Create session-specific agent with explicit prompt
+            session_tools = self._create_session_aware_tools(session_id)
+            
+            # Create the prompt with explicit continuation
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", explicit_prompt),
+                ("human", "{input}"),
+                MessagesPlaceholder(variable_name="chat_history"),
+                MessagesPlaceholder(variable_name="agent_scratchpad"),
+            ])
+
+            # Create session-specific agent
+            agent = create_openai_functions_agent(self.llm, session_tools, prompt)
+            session_agent_executor = AgentExecutor(
+                agent=agent,
+                tools=session_tools,
+                verbose=True,
+                max_iterations=50,
+                handle_parsing_errors=True,
+            )
+            
+            # Get session for chat history
+            session = self.get_session_from_db(session_id)
+            chat_history = session.get("history", []) if session else []
+            
+            # Execute with explicit continuation
+            response = session_agent_executor.invoke({
+                "input": "Continue with the remaining loan application steps", 
+                "chat_history": chat_history
+            })
+            
+            ai_message = response.get("output", "Continuing with loan application steps...")
+            
+            # Update conversation history
+            chat_history.append(HumanMessage(content=message))
+            chat_history.append(AIMessage(content=ai_message))
+            
+            # Update session
+            if session:
+                fresh_serializable_history = session.get("serializable_history", [])
+                fresh_serializable_history.append({
+                    "type": "HumanMessage",
+                    "content": message
+                })
+                fresh_serializable_history.append({
+                    "type": "AIMessage", 
+                    "content": ai_message
+                })
+                
+                self.update_session_data_field(session_id, "history", chat_history)
+                self.update_session_data_field(session_id, "serializable_history", fresh_serializable_history)
+            
+            return ai_message
+            
+        except Exception as e:
+            logger.error(f"Error in retry with explicit continuation: {e}")
+            return "I'm continuing with your loan application. Please wait while I process the remaining steps."
 
     def _format_bureau_decision_response(self, bureau_decision: Dict[str, Any], session_id: str) -> str:
         """
