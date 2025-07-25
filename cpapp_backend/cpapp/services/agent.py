@@ -64,7 +64,7 @@ class CarepayAgent:
         4. Keep ALL sections including employment type selection
         5. Do NOT add any additional text or instructions
 
-        IMPORTANT: You must complete ALL steps sequentially in one conversation turn. Do not stop after any individual step - continue through the entire process until you reach step 10.
+        IMPORTANT: Follow the conversation flow based on the current session status. Do NOT restart the process if additional details are being collected.
 
         Follow these steps sequentially to process a loan application: and don't miss any step and any tool calling
 
@@ -153,7 +153,7 @@ class CarepayAgent:
            - Use get_bureau_decision tool to get final loan decision using session_id
            - IMMEDIATELY proceed to step 10 after completion
 
-        CRITICAL: You must execute ALL 10 steps in sequence without stopping. Each step should flow directly into the next step until you complete the entire loan application process and provide the final decision to the user.
+        CRITICAL: Execute these steps in sequence, but STOP when you reach step 10 (get_bureau_decision) and provide the formatted response. Do NOT restart the process.
 
         CRITICAL: NEVER deviate from these exact steps and templates. Do not add, modify, or skip any steps.
         """
@@ -455,6 +455,12 @@ class CarepayAgent:
                 return ai_message
             
             logger.info(f"Session {session_id}: Using full agent executor (status: {current_status})")
+            
+            # Prevent LLM from restarting if we're in additional details collection mode
+            if current_status == "collecting_additional_details":
+                logger.info(f"Session {session_id}: Preventing LLM restart during additional details collection")
+                return "I'm currently collecting additional information. Please respond to my previous question."
+            
             # Create session-specific agent executor with session-aware tools
             session_tools = self._create_session_aware_tools(session_id)
             
@@ -780,6 +786,7 @@ class CarepayAgent:
         except Exception as e:
             logger.error(f"Error getting user ID from phone number: {e}")
             return f"Error getting user ID from phone number: {str(e)}"
+        
     def get_prefill_data(self, user_id: str = None, session_id: str = None) -> str:
         """
         Get prefilled user data
@@ -818,29 +825,34 @@ class CarepayAgent:
                     response_data = result.get("data", {}).get("response", {})
                     prefill_data = {}
                     prefill_data["userId"] = user_id
-                    
-                    # Extract and store key fields from prefill data
-                    if "pan" in response_data:
-                        prefill_data["panCard"] = response_data["pan"]
-                    
-                    if "gender" in response_data:
-                        prefill_data["gender"] = response_data["gender"]
-                    
-                    if "dob" in response_data:
-                        prefill_data["dateOfBirth"] = response_data["dob"]
-                    
-                    if "name" in response_data and isinstance(response_data["name"], dict):
-                        name_data = response_data["name"]
-                        if "firstName" in name_data:
-                            prefill_data["firstName"] = name_data["firstName"]
-                    
-                    # Handle email if present
-                    if "email" in response_data and response_data["email"]:
-                        emails = response_data["email"]
-                        if emails and isinstance(emails, list) and len(emails) > 0:
-                            first_email = emails[0]
-                            if isinstance(first_email, dict) and "email" in first_email:
-                                prefill_data["emailId"] = first_email["email"]
+
+                    # Extract and store key fields from prefill data using .get
+                    pan = response_data.get("pan")
+                    if pan:
+                        prefill_data["panCard"] = pan
+
+                    gender = response_data.get("gender")
+                    if gender:
+                        prefill_data["gender"] = gender
+
+                    dob = response_data.get("dob")
+                    if dob:
+                        prefill_data["dateOfBirth"] = dob
+
+                    name_data = response_data.get("name")
+                    if isinstance(name_data, dict):
+                        first_name = name_data.get("firstName")
+                        if first_name:
+                            prefill_data["firstName"] = first_name
+
+                    # Handle email if present using .get
+                    emails = response_data.get("email")
+                    if emails and isinstance(emails, list) and len(emails) > 0:
+                        first_email = emails[0]
+                        if isinstance(first_email, dict):
+                            email_id = first_email.get("email")
+                            if email_id:
+                                prefill_data["emailId"] = email_id
                     
                     # Store in session data using update_session_data_field
                     if prefill_data:
@@ -876,8 +888,6 @@ class CarepayAgent:
                     "address": address
                 })
             
-            
-                
             result = self.api_client.save_address_details(user_id, address)
             
             # Store the API response
@@ -890,8 +900,6 @@ class CarepayAgent:
             return f"Error saving address details: {str(e)}"
             
 
-    
-    
     def get_employment_verification(self, user_id: str = None, session_id: str = None) -> str:
         """
         Get employment verification data
