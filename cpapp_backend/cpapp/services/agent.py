@@ -75,12 +75,16 @@ class CarepayAgent:
            - Greet the user warmly and introduce yourself as CarePay's healthcare loan assistant
            - Collect and validate these four essential pieces of information:
               * Patient's full name
-              * Patient's phoneNumber(must be 10 digit number if not find 10 digit number then return error message and ask to enter valid phone number)
-              * treatmentCost (between ₹30,000 to ₹20,00,000)(must be positive number other wise return error message and ask to enter valid treatment cost)
-              * monthlyIncome(must be positive number other wise return error message and ask to enter valid monthly income)
-              if these four details not collect from user message then ask ther remaining ones
-           - Use the store_user_data tool and save this information in the session with the four parameters: fullName, phoneNumber, treatmentCost , monthlyIncome
-           - IMMEDIATELY proceed to step 2 after completion
+              * Patient's phoneNumber (must be a 10 digit number; if not, return an error message and ask the user to enter a valid phone number)
+              * treatmentCost (minimum ₹18,000, maximum ₹20,00,000; must be a positive number; if not, return an error message and ask the user to enter a valid treatment cost)
+              * monthlyIncome (must be a positive number; if not, return an error message and ask the user to enter a valid monthly income)
+              If any of these four details are missing from the user's message, ask for the remaining ones.
+           - CRITICAL: If the treatmentCost is less than ₹18,000, IMMEDIATELY STOP the process and return this message (do not proceed to any further steps):
+
+             "I understand your treatment cost is below ₹18,000. Currently, I can only process loan applications for treatments costing ₹18,000 or more. Please let me know if your treatment cost is ₹18,000 or above, and I'll be happy to help you with the loan application process."
+
+           - Use the store_user_data tool and save this information in the session with the four parameters: fullName, phoneNumber, treatmentCost, monthlyIncome
+           - IMMEDIATELY proceed to step 2 after completion (unless the treatmentCost is below ₹18,000, in which case the process must stop as above)
 
         2. User ID Creation:
            - didn't miss this step
@@ -453,6 +457,20 @@ class CarepayAgent:
             # Convert "name" to "fullName" for consistency 
             if "name" in data and "fullName" not in data:
                 data["fullName"] = data.pop("name")
+            
+            # Validate treatment cost - minimum requirement is ₹18,000
+            treatment_cost = data.get("treatmentCost")
+            if treatment_cost is not None:
+                try:
+                    # Convert to float, handling various formats (₹, commas, etc.)
+                    cost_str = str(treatment_cost).replace('₹', '').replace(',', '').strip()
+                    cost_value = float(cost_str)
+                    
+                    if cost_value < 18000:
+                        return f"I understand your treatment cost is ₹{cost_value:,.0f}. Currently, I can only process loan applications for treatments costing ₹18,000 or more. Please let me know if your treatment cost is ₹18,000 or above, and I'll be happy to help you with the loan application process."
+                except (ValueError, TypeError):
+                    # If we can't parse the cost, continue with normal flow
+                    logger.warning(f"Could not parse treatment cost: {treatment_cost}")
             
             # Check if user_id is present in the data
             if 'user_id' in data or 'userId' in data:
