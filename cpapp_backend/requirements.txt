@@ -12,3 +12,6 @@ requests>=2.31.0
 pytesseract==0.3.13
 pillow==11.1.0
 PyJWT==2.10.1
+pdf2image==1.16.3
+opencv-python==4.8.1.78
+numpy==1.24.3
