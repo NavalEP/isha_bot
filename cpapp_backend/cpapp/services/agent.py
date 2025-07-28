@@ -97,7 +97,7 @@ class CarepayAgent:
         3. Basic Details Submission:
            - didn't miss this step
            - Retrieve name and phone number from session data
-           - IMPORTANT: When calling save_basic_details, call this tool using session_id.
+           - IMPORTANT: When calling save_basic_details, call this tool using session_id for invoking.
            - IMMEDIATELY proceed to step 4 after completion
 
         4. Save Loan Details:
@@ -433,6 +433,37 @@ class CarepayAgent:
     
     # Tool implementations
     
+    def store_user_data_structured(self, fullName: str, phoneNumber: str, treatmentCost: int, monthlyIncome: int, session_id: str) -> str:
+        """
+        Store user data in the session using structured input
+        
+        Args:
+            fullName: Patient's full name
+            phoneNumber: Patient's phone number
+            treatmentCost: Treatment cost amount
+            monthlyIncome: Monthly income amount
+            session_id: Session identifier
+            
+        Returns:
+            Confirmation message
+        """
+        try:
+            # Convert structured input to JSON string format
+            data = {
+                "fullName": fullName,
+                "phoneNumber": phoneNumber,
+                "treatmentCost": treatmentCost,
+                "monthlyIncome": monthlyIncome
+            }
+            
+            # Convert to JSON string and call the original method
+            input_str = json.dumps(data)
+            return self.store_user_data(input_str, session_id)
+            
+        except Exception as e:
+            logger.error(f"Error in store_user_data_structured: {e}")
+            return f"Error storing data: {str(e)}"
+
     def store_user_data(self, input_str: str, session_id: str) -> str:
         """
         Store user data in the session
@@ -564,7 +595,7 @@ class CarepayAgent:
                         f"for session {session_id}."
                     )
             
-            return user_id_from_api if user_id_from_api else "userId not found in API response"
+            return session_id, user_id_from_api if user_id_from_api else "userId not found in API response"
         except Exception as e:
             logger.error(f"Error getting user ID from phone number: {e}")
             return f"Error getting user ID from phone number: {str(e)}"
@@ -837,6 +868,35 @@ class CarepayAgent:
             logger.error(f"Error saving employment details: {e}")
             return f"Error saving employment details: {str(e)}"
     
+    def save_loan_details_structured(self, fullName: str, treatmentCost: int, userId: str, session_id: str) -> str:
+        """
+        Save loan details using structured input
+        
+        Args:
+            fullName: Patient's full name
+            treatmentCost: Treatment cost amount
+            userId: User ID
+            session_id: Session identifier
+            
+        Returns:
+            Save result as JSON string
+        """
+        try:
+            # Convert structured input to JSON string format
+            data = {
+                "fullName": fullName,
+                "treatmentCost": treatmentCost,
+                "userId": userId
+            }
+            
+            # Convert to JSON string and call the original method
+            input_str = json.dumps(data)
+            return self.save_loan_details(input_str, session_id)
+            
+        except Exception as e:
+            logger.error(f"Error in save_loan_details_structured: {e}")
+            return f"Error saving loan details: {str(e)}"
+
     def save_loan_details(self, input_str: str, session_id: str) -> str:
         """
         Save loan details
@@ -2120,10 +2180,10 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             List of tools with session_id bound
         """
         return [
-            Tool(
+            StructuredTool.from_function(
+                func=lambda fullName, phoneNumber, treatmentCost, monthlyIncome: self.store_user_data_structured(fullName, phoneNumber, treatmentCost, monthlyIncome, session_id),
                 name="store_user_data",
-                func=lambda input_str: self.store_user_data(input_str, session_id),
-                description="Store user data in session with the four parameters: fullName, phoneNumber, treatmentCost , monthlyIncome ",
+                description="Store user data in session with the four parameters: fullName, phoneNumber, treatmentCost, monthlyIncome",
             ),
             Tool(
                 name="get_user_id_from_phone_number",
@@ -2135,10 +2195,10 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                 func=lambda session_id: self.save_basic_details(session_id),
                 description="Save user's basic personal details. Call this tool using session_id ",
             ),
-            Tool(
+            StructuredTool.from_function(
+                func=lambda fullName, treatmentCost, userId: self.save_loan_details_structured(fullName, treatmentCost, userId, session_id),
                 name="save_loan_details",
-                func=lambda input_str: self.save_loan_details(input_str, session_id),
-                description="Save user's loan details. Must pass either a user ID as a string or a JSON object with userId and other fields like fullName, treatmentCost, etc.",
+                description="Save user's loan details with fullName, treatmentCost, and userId parameters.",
             ),
             Tool(
                 name="check_jp_cardless",
