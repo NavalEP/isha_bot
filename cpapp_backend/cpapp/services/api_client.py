@@ -13,11 +13,7 @@ class CarepayAPIClient:
     
     def __init__(self):
         self.base_url = os.getenv('CAREPAY_API_BASE_URL', 'https://backend.carepay.money')
-        # Default doctor details that can be overridden with actual values from API
-        self.doctor_id = os.getenv('DOCTOR_ID', None)
-        self.doctor_name = os.getenv('DOCTOR_NAME', None)
-        # Flag to track if we have actual doctor details
-        self.has_doctor_details = False
+       
         
     def _make_request(self, method: str, endpoint: str, params: Optional[Dict[str, Any]] = None, 
                      data: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -251,17 +247,10 @@ class CarepayAPIClient:
         """Save loan details"""
         endpoint = f"userDetails/saveLoanDetails"
         
-        # Use provided doctor details if available, otherwise use instance variables
-        doctor_id_to_use = doctor_id if doctor_id is not None else self.doctor_id
-        doctor_name_to_use = doctor_name if doctor_name is not None else self.doctor_name
-        
-        # Log a warning if we're using default doctor details
-        if not self.has_doctor_details and doctor_id is None and doctor_name is None:
-            logger.warning("Using default doctor details. Call get_doctor_details first to use actual details.")
             
         data = {
-            "doctorId": doctor_id_to_use,
-            "doctorName": doctor_name_to_use,
+            "doctorId": doctor_id,
+            "doctorName": doctor_name,
             "formStatus": "",
             "loanAmount": loan_amount,
             "treatmentAmount": loan_amount,

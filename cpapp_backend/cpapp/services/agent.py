@@ -1211,8 +1211,14 @@ class CarepayAgent:
             loan_amount = data.get("treatmentCost")
 
             # Get doctor details from session if available
-            doctor_id = data.get("doctor_id")
-            doctor_name = data.get("doctor_name")
+            doctor_id = None
+            doctor_name = None
+            if session_id:
+                session = SessionManager.get_session_from_db(session_id)
+                if session and "data" in session:
+                    session_data = session["data"]
+                    doctor_id = session_data.get("doctor_id") or session_data.get("doctorId")
+                    doctor_name = session_data.get("doctor_name") or session_data.get("doctorName")
 
             logger.info(f"Retrieved doctor_id {doctor_id} and doctor_name {doctor_name} from session for loan details")
 
@@ -1945,10 +1951,11 @@ class CarepayAgent:
             
             # Handle employment type input (first step)
             if collection_step == "employment_type":
-                if "1" in message:
+                # Check for both number and word inputs
+                if "1" in message or "salaried" in message.lower():
                     additional_details["employment_type"] = "SALARIED"
                     selected_option = "SALARIED"
-                elif "2" in message:
+                elif "2" in message or "self" in message.lower() and "employed" in message.lower():
                     additional_details["employment_type"] = "SELF_EMPLOYED"
                     selected_option = "SELF_EMPLOYED"
                 else:
@@ -1968,10 +1975,11 @@ please Enter input 1 or 2 only"""
             
             # Handle marital status input
             elif collection_step == "marital_status":
-                if "1" in message:
+                # Check for both number and word inputs
+                if "1" in message or "married" in message.lower():
                     additional_details["marital_status"] = "1"
                     selected_option = "Married"
-                elif "2" in message:
+                elif "2" in message or "unmarried" in message.lower() or "single" in message.lower():
                     additional_details["marital_status"] = "2"
                     selected_option = "Unmarried/Single"
                 else:
@@ -2006,9 +2014,32 @@ Please Enter input between 1 to 7 only"""
                     "7": "P.H.D"
                 }
                 
+                # Check for both number and word inputs
+                selected_key = None
+                message_lower = message.lower().strip()
+                
+                # First check if it's a number
                 if message.strip() in education_options:
-                    additional_details["education_qualification"] = message.strip()
-                    selected_option = education_options[message.strip()]
+                    selected_key = message.strip()
+                # Then check for word matches
+                elif "less" in message_lower and "10th" in message_lower:
+                    selected_key = "1"
+                elif "passed 10th" in message_lower or "10th" in message_lower:
+                    selected_key = "2"
+                elif "passed 12th" in message_lower or "12th" in message_lower:
+                    selected_key = "3"
+                elif "diploma" in message_lower:
+                    selected_key = "4"
+                elif "graduation" in message_lower and "post" not in message_lower:
+                    selected_key = "5"
+                elif "post graduation" in message_lower or "postgraduation" in message_lower:
+                    selected_key = "6"
+                elif "phd" in message_lower or "p.h.d" in message_lower:
+                    selected_key = "7"
+                
+                if selected_key:
+                    additional_details["education_qualification"] = selected_key
+                    selected_option = education_options[selected_key]
                 else:
                     return "Please select a valid option for Education Qualification (1-7)"
                 
