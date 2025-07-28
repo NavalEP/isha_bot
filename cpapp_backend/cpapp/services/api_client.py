@@ -13,11 +13,7 @@ class CarepayAPIClient:
     
     def __init__(self):
         self.base_url = os.getenv('CAREPAY_API_BASE_URL', 'https://backend.carepay.money')
-        # Default doctor details that can be overridden with actual values from API
-        self.doctor_id = os.getenv('DOCTOR_ID', None)
-        self.doctor_name = os.getenv('DOCTOR_NAME', None)
-        # Flag to track if we have actual doctor details
-        self.has_doctor_details = False
+    
         
     def _make_request(self, method: str, endpoint: str, params: Optional[Dict[str, Any]] = None, 
                      data: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -251,17 +247,11 @@ class CarepayAPIClient:
         """Save loan details"""
         endpoint = f"userDetails/saveLoanDetails"
         
-        # Use provided doctor details if available, otherwise use instance variables
-        doctor_id_to_use = doctor_id if doctor_id is not None else self.doctor_id
-        doctor_name_to_use = doctor_name if doctor_name is not None else self.doctor_name
-        
-        # Log a warning if we're using default doctor details
-        if not self.has_doctor_details and doctor_id is None and doctor_name is None:
-            logger.warning("Using default doctor details. Call get_doctor_details first to use actual details.")
+       
             
         data = {
-            "doctorId": doctor_id_to_use,
-            "doctorName": doctor_name_to_use,
+            "doctorId": doctor_id,
+            "doctorName": doctor_name,
             "formStatus": "",
             "loanAmount": loan_amount,
             "treatmentAmount": loan_amount,
@@ -554,3 +544,144 @@ class CarepayAPIClient:
         params = {"userId": user_id}
         logger.info(f"Getting SurePass bureau report for userId: {user_id}")
         return self._make_request('GET', endpoint, params=params)
+    
+    def save_aadhaar_details(self, user_id: str, details: Dict[str, Any]) -> Dict[str, Any]:
+        """Save basic personal details"""
+        endpoint = f"userDetails/basicDetail"
+        data = {
+            "aadhaarNo": details.get("aadhaarNo", None),
+            "dateOfBirth": details.get("dateOfBirth", None),
+            "fatherName": details.get("fatherName", None),
+            "firstName": details.get("firstName", None),
+            "formStatus": details.get("formStatus", None),
+            "gender": details.get("gender", None),
+            "mobileNumber": details.get("mobileNumber", None),
+            "userId": user_id
+        }
+        return self._make_request('POST', endpoint, data=data)
+    
+    def save_emailaddress_details(self, user_id: str, details: Dict[str, Any]) -> Dict[str, Any]:
+        """Save email address details"""
+        endpoint = f"userDetails/basicDetail"
+        data = {
+           
+            "emailId": details.get("emailId", None),
+            "mobileNumber": details.get("mobileNumber", None),
+            "userId": user_id
+        }
+        return self._make_request('POST', endpoint, data=data)
+    
+    def save_panCard_details(self, user_id: str, details: Dict[str, Any]) -> Dict[str, Any]:
+        """Save pan card details"""
+        endpoint = f"userDetails/basicDetail"
+        data = {
+            "mobileNumber": details.get("mobileNumber", None),
+            "panCard": details.get("panCard", None),
+            "userId": user_id
+        }
+        return self._make_request('POST', endpoint, data=data)
+    
+    def save_permanent_address_details(self, user_id: str, address: Dict[str, Any]) -> Dict[str, Any]:
+        """Save address details"""
+        endpoint = f"userDetails/addressDetail"
+        data = {
+            "address": address.get("address", None),
+            "addressType": "permanent", 
+            "city": address.get("city", ""),
+            "formStatus": address.get("formStatus", ""),
+            "pincode": address.get("pincode", None),
+            "state": address.get("state", None),
+            "userId": user_id
+        }
+        return self._make_request('POST', endpoint, data=data)
+    
+    def save_gender_details(self, user_id: str, details: Dict[str, Any]) -> Dict[str, Any]:
+        """Save basic personal details"""
+        endpoint = f"userDetails/basicDetail"
+        data = {
+           
+            "gender": details.get("gender"),
+            "mobileNumber": details.get("mobileNumber"),
+            "userId": user_id
+        }
+        return self._make_request('POST', endpoint, data=data)
+    
+    def save_marital_status_details(self, user_id: str, details: Dict[str, Any]) -> Dict[str, Any]:
+        """Save basic personal details"""
+        endpoint = f"userDetails/basicDetail"
+        data = {
+            
+            "maritalStatus": details.get("maritalStatus"),
+            "mobileNumber": details.get("mobileNumber"),
+            "userId": user_id
+        }
+        return self._make_request('POST', endpoint, data=data)
+    
+    def save_education_level_details(self, user_id: str, details: Dict[str, Any]) -> Dict[str, Any]:
+        """Save basic personal details"""
+        endpoint = f"userDetails/basicDetail"
+        data = {        
+            "educationLevel": details.get("educationLevel"),
+            "mobileNumber": details.get("mobileNumber"),
+            "userId": user_id
+        }
+        return self._make_request('POST', endpoint, data=data)
+    
+    def save_change_treatment_name_details(self, user_id: str, loan_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Save loan details"""
+        endpoint = f"userDetails/saveLoanDetails"
+        
+        # Use provided doctor details if available, otherwise use instance variables
+        doctor_id_to_use = loan_data.get("doctorId")
+        doctor_name_to_use = loan_data.get("doctorName")
+        
+        # Log a warning if we're using default doctor details
+        if not self.has_doctor_details and doctor_id_to_use is None and doctor_name_to_use is None:
+            logger.warning("Using default doctor details. Call get_doctor_details first to use actual details.")
+            
+        data = {
+            "doctorId": doctor_id_to_use,
+            "doctorName": doctor_name_to_use,
+            "formStatus": "",
+            "loanAmount": loan_data.get("treatmentCost"),
+            "treatmentAmount": loan_data.get("treatmentCost"),
+            "loanReason": loan_data.get("loanReason"),
+            "Name": loan_data.get("fullName"),
+            "userId": user_id
+        }
+        return self._make_request('POST', endpoint, data=data)
+    
+    def save_change_treatment_cost_details(self, user_id: str, loan_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Save loan details"""
+        endpoint = f"userDetails/saveLoanDetails"
+        
+        # Use provided doctor details if available, otherwise use instance variables
+        doctor_id_to_use = loan_data.get("doctorId")
+        doctor_name_to_use = loan_data.get("doctorName")
+        
+        # Log a warning if we're using default doctor details
+        if not self.has_doctor_details and doctor_id_to_use is None and doctor_name_to_use is None:
+            logger.warning("Using default doctor details. Call get_doctor_details first to use actual details.")
+            
+        data = {
+            "doctorId": doctor_id_to_use,
+            "doctorName": doctor_name_to_use,
+            "formStatus": "",
+            "loanAmount": loan_data.get("treatmentCost"),
+            "treatmentAmount": loan_data.get("treatmentCost"),
+            "loanReason": loan_data.get("loanReason"),
+            "Name": loan_data.get("fullName"),
+            "userId": user_id
+        }
+        return self._make_request('POST', endpoint, data=data)
+    
+    def save_change_date_of_birth_details(self, user_id: str, details: Dict[str, Any]) -> Dict[str, Any]:
+        """Save basic personal details"""
+        endpoint = f"userDetails/basicDetail"
+        data = {
+           
+            "dateOfBirth": details.get("dateOfBirth"),
+            "mobileNumber": details.get("mobileNumber"),
+            "userId": user_id
+        }
+        return self._make_request('POST', endpoint, data=data)

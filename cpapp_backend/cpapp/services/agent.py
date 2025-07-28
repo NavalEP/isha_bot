@@ -44,7 +44,7 @@ class CarepayAgent:
         # Initialize LLM
         self.llm = ChatOpenAI(
             openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
-            model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+            model=os.environ.get("OPENAI_MODEL", "gpt-4o"),
             temperature=0.2,
         )
         
@@ -835,9 +835,19 @@ class CarepayAgent:
             name = data.get("fullName")
             loan_amount = data.get("treatmentCost")
 
-            # Get doctor details from session if available
-            doctor_id = data.get("doctor_id")
-            doctor_name = data.get("doctor_name")
+            # Try to get doctor_id and doctor_name from session data if not present in input
+            doctor_id = data.get("doctorId") or data.get("doctor_id")
+            doctor_name = data.get("doctorName") or data.get("doctor_name")
+
+            if session_id:
+                session = SessionManager.get_session_from_db(session_id)
+                if session and "data" in session:
+                    session_data = session["data"]
+                    # Try to get doctor_id and doctor_name from session data if not already set
+                    if not doctor_id:
+                        doctor_id = session_data.get("doctorId") or session_data.get("doctor_id")
+                    if not doctor_name:
+                        doctor_name = session_data.get("doctorName") or session_data.get("doctor_name")
 
             logger.info(f"Retrieved doctor_id {doctor_id} and doctor_name {doctor_name} from session for loan details")
 
