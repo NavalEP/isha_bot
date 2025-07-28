@@ -11,8 +11,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Initialize the client with your API key
-client = OpenAI(api_key="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")
+# Initialize the client with API key from environment variable
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 def extract_pincode_from_text(text: str) -> str:
     """
