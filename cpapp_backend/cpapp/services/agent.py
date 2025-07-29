@@ -45,7 +45,7 @@ class CarepayAgent:
         # Initialize LLM
         self.llm = ChatOpenAI(
             openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
-            model=os.environ.get("OPENAI_MODEL", "gpt-3.5-turbo"),
+            model=os.environ.get("OPENAI_MODEL", "gpt-4o"),
             temperature=0.2,
         )
         
@@ -108,7 +108,7 @@ class CarepayAgent:
         3. Basic Details Submission:
            - didn't miss this step
            - Retrieve name and phone number from session data
-           - IMPORTANT: When calling save_basic_details, call this tool using session_id.
+           - IMPORTANT: When calling save_basic_details, call this tool using session_id for invoking.
            - IMMEDIATELY proceed to step 4 after completion
 
         4. Save Loan Details:
@@ -897,7 +897,7 @@ class CarepayAgent:
                         f"for session {session_id}."
                     )
             
-            return user_id_from_api if user_id_from_api else "userId not found in API response"
+            return session_id, user_id_from_api if user_id_from_api else "userId not found in API response"
         except Exception as e:
             logger.error(f"Error getting user ID from phone number: {e}")
             return f"Error getting user ID from phone number: {str(e)}"
@@ -1225,15 +1225,19 @@ class CarepayAgent:
             name = data.get("fullName")
             loan_amount = data.get("treatmentCost")
 
-            # Get doctor details from session if available
-            doctor_id = None
-            doctor_name = None
+            # Try to get doctor_id and doctor_name from session data if not present in input
+            doctor_id = data.get("doctorId") or data.get("doctor_id")
+            doctor_name = data.get("doctorName") or data.get("doctor_name")
+
             if session_id:
                 session = SessionManager.get_session_from_db(session_id)
                 if session and "data" in session:
                     session_data = session["data"]
-                    doctor_id = session_data.get("doctor_id") or session_data.get("doctorId")
-                    doctor_name = session_data.get("doctor_name") or session_data.get("doctorName")
+                    # Try to get doctor_id and doctor_name from session data if not already set
+                    if not doctor_id:
+                        doctor_id = session_data.get("doctorId") or session_data.get("doctor_id")
+                    if not doctor_name:
+                        doctor_name = session_data.get("doctorName") or session_data.get("doctor_name")
 
             logger.info(f"Retrieved doctor_id {doctor_id} and doctor_name {doctor_name} from session for loan details")
 
