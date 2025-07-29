@@ -72,6 +72,13 @@ class CarepayAgent:
 
         CRITICAL EXECUTION RULE: You MUST execute ALL steps in sequence. Do NOT stop until you reach step 10. If any step succeeds, immediately proceed to the next step.
 
+        If the user wants to change, correct, or update any of these required fields: treatment reason, treatment cost, or date of birth, you MUST use the appropriate tool ONLY when the session status is "additional_details_completed" (after the application process is complete):
+        - Use correct_treatment_reason tool to update the treatment reason.
+        - Use correct_treatment_cost tool to update the treatment cost.
+        - Use correct_date_of_birth tool to update the date of birth.
+        - CRITICAL: These correction tools will only work after the user has completed the entire application process and the session status is "additional_details_completed".
+        - If the user tries to make corrections before completing the application, inform them they need to complete the application first.
+
         Follow these steps sequentially to process a loan application: and don't miss any step and any tool calling
 
         1. Initial Data Collection:
@@ -148,7 +155,7 @@ class CarepayAgent:
            - CRITICAL: If get_prefill_data returns ANY OTHER status (including other 500 errors), follow WORKFLOW A (Normal Flow)
            - CRITICAL: Do NOT ask for Aadhaar upload for any other reason or error condition
            - If user responds with "Successfully processed Aadhaar document and saved details.":
-             * Respond: "Great! Your Aadhaar card has been processed successfully. Now, please provide your PAN card number to continue with the loan application process."
+             * Respond: "Great! Your Aadhaar card has been processed successfully. Now, please provide your PAN card details. You can either:\n\n**Upload your PAN card** by clicking the file upload button below\n\n**Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
            - If user provides a PAN card number (10 character alphanumeric string):
              * Use handle_pan_card_number tool to save the PAN card number
              * After successful save, ask for email address
@@ -170,7 +177,7 @@ class CarepayAgent:
            - After processing the prefill data, use the process_address_data tool by session_id  
            - Use pan_verification tool using session_id 
            - CRITICAL: If pan_verification returns status 500 or error:
-             * Ask user: "Please provide your PAN card number to continue with the loan application process."
+             * Ask user: "Please provide your PAN card details. You can either:\n\n1. **Upload your PAN card** by clicking the file upload button below\n2. **Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
              * When user provides PAN card number (10 character alphanumeric string):
                * Use handle_pan_card_number tool to save the PAN card number
            - If pan_verification returns status 200, continue to step 8
@@ -246,7 +253,7 @@ class CarepayAgent:
         - If user responds with "Successfully processed Aadhaar document and saved details.":
           * Skip steps 1-5 (they are already completed)
           * Start directly from step 6 (Data Prefill)
-          * Respond: "Great! Your Aadhaar card has been processed successfully. Now, please provide your PAN card number to continue with the loan application process."
+          * Respond: "Great! Your Aadhaar card has been processed successfully. Now, please provide your PAN card details. You can either:\n\n **Upload your PAN card** by clicking the file upload button below\n\n**Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
         - If user provides a PAN card number (10 character alphanumeric string):
           * Use handle_pan_card_number tool to save the PAN card number
           * After successful save, ask for email address: "Please provide your email address to continue."
@@ -270,7 +277,7 @@ class CarepayAgent:
         
         CRITICAL PAN VERIFICATION HANDLING:
         - When pan_verification tool returns status 500 or error:
-          * Ask user: "Please provide your PAN card number to continue with the loan application process."
+          * Ask user: "Please provide your PAN card details. You can either:\n\n1. **Upload your PAN card** by clicking the file upload button below\n2. **Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
           * When user provides PAN card number (10 character alphanumeric string):
             * Use handle_pan_card_number tool to save the PAN card number
             * After successful save, ask for email address: "Please provide your email address to continue."
@@ -594,6 +601,14 @@ class CarepayAgent:
                 if not session.get("data", {}).get("additional_details"):
                     SessionManager.update_session_data_field(session_id, "data.additional_details", {})
                 logger.info(f"Forced status update to collecting_additional_details")
+            
+            # Check if user is trying to make corrections before application completion
+            correction_keywords = ["change", "correct", "update", "modify", "edit", "wrong", "mistake"]
+            is_correction_request = any(keyword in message.lower() for keyword in correction_keywords)
+            
+            if is_correction_request and current_status != "additional_details_completed":
+                ai_message = "❌ Corrections are only allowed after you have completed your loan application. Please complete the application process first, then you can make any necessary corrections."
+                logger.info(f"User attempted correction before application completion. Session status: {current_status}")
             
             # Otherwise, just update the conversation history and return
             self._update_session_history(session_id, message, ai_message)
@@ -2276,8 +2291,9 @@ Please enter 6 digits:"""
 Thank you! Your application is now complete. Your Loan application decision: {decision_status}."""
                 else:
                     return f"""Workplace pincode noted: {pincode}
-
-Thank you! Your application is now complete. Loan application decision: {decision_status}. Please check your application status by visiting the following:
+             
+Thank you! Your application is now complete. Loan application decision: {decision_status}. 
+Please check your application status by visiting the following:
 {link_to_display}"""
             
             # If collection is complete, give a final message
@@ -2614,6 +2630,21 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                 name="save_education_level_details",
                 func=lambda education_level: self.save_education_level_details(education_level, session_id),
                 description="Save user's education level details. Use this when user provides their education level information.",
+            ),
+            Tool(
+                name="correct_treatment_reason",
+                func=lambda new_treatment_reason: self.correct_treatment_name(new_treatment_reason, session_id),
+                description="Correct/update the treatment name in the loan application. Use this when user wants to change their treatment name. ONLY works after application completion (status: additional_details_completed).",
+            ),
+            Tool(
+                name="correct_treatment_cost",
+                func=lambda new_treatment_cost: self.correct_treatment_cost(new_treatment_cost, session_id),
+                description="Correct/update the treatment cost in the loan application. Use this when user wants to change their treatment cost (must be >= ₹3,000). ONLY works after application completion (status: additional_details_completed).",
+            ),
+            Tool(
+                name="correct_date_of_birth",
+                func=lambda new_date_of_birth: self.correct_date_of_birth(new_date_of_birth, session_id),
+                description="Correct/update the date of birth in the user profile. Use this when user wants to change their date of birth (format: YYYY-MM-DD). ONLY works after application completion (status: additional_details_completed).",
             ),
         ]
 
@@ -3653,3 +3684,322 @@ Please Enter input 1 or 2 only"""
         except Exception as e:
             logger.error(f"Error saving education level details: {e}")
             return f"Error saving education level details: {str(e)}"
+
+    def correct_treatment_name(self, new_treatment_reason: str, session_id: str) -> str:
+        """
+        Correct/update the treatment name in the loan application
+        
+        Args:
+            new_treatment_name: The new/corrected treatment name
+            session_id: Session ID to get user data from
+            
+        Returns:
+            Success or error message
+        """
+        try:
+            # Get session data
+            session_data = SessionManager.get_session_from_db(session_id)
+            if not session_data:
+                return "❌ Error: Session not found. Please start a new conversation."
+            
+            # Check if session status allows corrections
+            session_status = session_data.get('status', '')
+            if session_status != "additional_details_completed":
+                return "❌ Error: Corrections are only allowed after the application process is complete. Please complete your application first."
+            
+            user_data = session_data.get('data', {})
+            user_id = user_data.get('userId')
+            
+            if not user_id:
+                return "❌ Error: User ID not found in session. Please complete the initial setup first."
+            
+            # Get existing loan data from session
+            loan_data = {
+                "doctorId": user_data.get('doctorId'),
+                "doctorName": user_data.get('doctorName'),
+                "treatmentCost": user_data.get('treatmentCost'),
+                "loanReason": new_treatment_reason,
+                "fullName": user_data.get('fullName')
+            }
+            
+            # Call API to update treatment name
+            response = self.api_client.save_change_treatment_name_details(user_id, loan_data)
+            
+            if response.get("status") == 200:
+                # Update session with new treatment name
+                SessionManager.update_session_data_field(session_id, "data.fullName", new_treatment_reason)
+                
+                return f"✅ Treatment name has been successfully updated to '{new_treatment_reason}'!"
+            else:
+                error_msg = response.get("error", "Unknown error occurred")
+                logger.error(f"Failed to update treatment name: {error_msg}")
+                return f"❌ Error updating treatment name: {error_msg}"
+                
+        except Exception as e:
+            logger.error(f"Error in correct_treatment_name: {e}")
+            return f"❌ Error: {str(e)}"
+
+    def correct_treatment_cost(self, new_treatment_cost: int, session_id: str) -> str:
+        """
+        Correct/update the treatment cost in the loan application
+        
+        Args:
+            new_treatment_cost: The new/corrected treatment cost (must be >= 3000)
+            session_id: Session ID to get user data from
+            
+        Returns:
+            Success or error message
+        """
+        try:
+            # Validate treatment cost
+            if new_treatment_cost < 3000:
+                return "❌ Error: Treatment cost must be ₹3,000 or more. Please enter a valid amount."
+            
+            # Get session data
+            session_data = SessionManager.get_session_from_db(session_id)
+            if not session_data:
+                return "❌ Error: Session not found. Please start a new conversation."
+            
+            # Check if session status allows corrections
+            session_status = session_data.get('status', '')
+            if session_status != "additional_details_completed":
+                return "❌ Error: Corrections are only allowed after the application process is complete. Please complete your application first."
+            
+            user_data = session_data.get('data', {})
+            user_id = user_data.get('userId')
+            
+            if not user_id:
+                return "❌ Error: User ID not found in session. Please complete the initial setup first."
+            
+            # Get treatment_reason from additional_details if available
+            additional_details = user_data.get('additional_details', {})
+            treatment_reason = additional_details.get('treatment_reason', '')
+
+            # Get existing loan data from session, using treatment_reason from additional_details
+            loan_data = {
+                "doctorId": user_data.get('doctorId'),
+                "doctorName": user_data.get('doctorName'),
+                "treatmentCost": new_treatment_cost,  # Use the new treatment cost
+                "loanReason": treatment_reason,
+                "fullName": user_data.get('fullName')
+            }
+            
+            # Call API to update treatment cost
+            response = self.api_client.save_change_treatment_cost_details(user_id, loan_data)
+            
+            if response.get("status") == 200:
+                # Update session with new treatment cost
+                SessionManager.update_session_data_field(session_id, "data.treatmentCost", new_treatment_cost)
+                
+                return f"✅ Treatment cost has been successfully updated to ₹{new_treatment_cost:,}!"
+            else:
+                error_msg = response.get("error", "Unknown error occurred")
+                logger.error(f"Failed to update treatment cost: {error_msg}")
+                return f"❌ Error updating treatment cost: {error_msg}"
+                
+        except Exception as e:
+            logger.error(f"Error in correct_treatment_cost: {e}")
+            return f"❌ Error: {str(e)}"
+
+    def correct_date_of_birth(self, new_date_of_birth: str, session_id: str) -> str:
+        """
+        Correct/update the date of birth in the user profile
+        
+        Args:
+            new_date_of_birth: The new/corrected date of birth (format: YYYY-MM-DD)
+            session_id: Session ID to get user data from
+            
+        Returns:
+            Success or error message
+        """
+        try:
+            # Validate date format
+            try:
+                datetime.strptime(new_date_of_birth, '%Y-%m-%d')
+            except ValueError:
+                return "❌ Error: Please enter the date in YYYY-MM-DD format (e.g., 1990-01-15)."
+            
+            # Get session data
+            session_data = SessionManager.get_session_from_db(session_id)
+            if not session_data:
+                return "❌ Error: Session not found. Please start a new conversation."
+            
+            # Check if session status allows corrections
+            session_status = session_data.get('status', '')
+            if session_status != "additional_details_completed":
+                return "❌ Error: Corrections are only allowed after the application process is complete. Please complete your application first."
+            
+            user_data = session_data.get('data', {})
+            user_id = user_data.get('userId')
+            phone_number = user_data.get('phoneNumber')
+            
+            if not user_id:
+                return "❌ Error: User ID not found in session. Please complete the initial setup first."
+            
+            if not phone_number:
+                return "❌ Error: Phone number not found in session. Please complete the initial setup first."
+            
+            # Prepare details for API
+            details = {
+                "dateOfBirth": new_date_of_birth,
+                "mobileNumber": phone_number,
+                "userId": user_id
+            }
+            
+            # Call API to update date of birth
+            response = self.api_client.save_change_date_of_birth_details(user_id, details)
+            
+            if response.get("status") == 200:
+                # Update session with new date of birth
+                SessionManager.update_session_data_field(session_id, "data.dateOfBirth", new_date_of_birth)
+                
+                return f"✅ Date of birth has been successfully updated to {new_date_of_birth}!"
+            else:
+                error_msg = response.get("error", "Unknown error occurred")
+                logger.error(f"Failed to update date of birth: {error_msg}")
+                return f"❌ Error updating date of birth: {error_msg}"
+                
+        except Exception as e:
+            logger.error(f"Error in correct_date_of_birth: {e}")
+            return f"❌ Error: {str(e)}"
+
+    def handle_pan_card_upload(self, document_path: str, session_id: str, ocr_result: dict = None) -> dict:
+        """
+        Handle PAN card upload and save extracted details
+        
+        Args:
+            document_path: Path to the uploaded PAN card document
+            session_id: Session ID to get user data from
+            ocr_result: Pre-extracted OCR result (optional)
+            
+        Returns:
+            Dictionary with status and message
+        """
+        try:
+            # Get session data
+            session_data = SessionManager.get_session_from_db(session_id)
+            if not session_data:
+                return {
+                    'status': 'error',
+                    'message': 'Session not found. Please start a new conversation.'
+                }
+            
+            user_data = session_data.get('data', {})
+            user_id = user_data.get('userId')
+            phone_number = user_data.get('phoneNumber')
+            
+            if not user_id:
+                return {
+                    'status': 'error',
+                    'message': 'User ID not found in session. Please complete the initial setup first.'
+                }
+            
+            if not phone_number:
+                return {
+                    'status': 'error',
+                    'message': 'Phone number not found in session. Please complete the initial setup first.'
+                }
+            
+            # Extract PAN details if not provided
+            if not ocr_result:
+                from cpapp.services.ocr_service import extract_pan_details
+                ocr_result = extract_pan_details(document_path)
+            
+            # Validate OCR result
+            if not ocr_result or not any(ocr_result.values()):
+                return {
+                    'status': 'error',
+                    'message': 'Failed to extract PAN card details from the uploaded document.'
+                }
+            
+            pan_card_number = ocr_result.get('pan_card_number', '')
+            person_name = ocr_result.get('person_name', '')
+            date_of_birth = ocr_result.get('date_of_birth', '')
+            gender = ocr_result.get('gender', '')
+            father_name = ocr_result.get('father_name', '')
+            
+            # Validate PAN card number
+            if not pan_card_number:
+                return {
+                    'status': 'error',
+                    'message': 'Could not extract PAN card number from the document.'
+                }
+            
+            # Save PAN card number to API
+            pan_details = {
+                "panCard": pan_card_number,
+                "mobileNumber": phone_number
+            }
+            
+            pan_response = self.api_client.save_panCard_details(user_id, pan_details)
+            
+            if pan_response.get("status") != 200:
+                logger.error(f"Failed to save PAN card number: {pan_response}")
+                return {
+                    'status': 'error',
+                    'message': f'Failed to save PAN card number: {pan_response.get("error", "Unknown error")}'
+                }
+            
+            # Save other details if available
+            details_to_save = {}
+            
+            if person_name:
+                details_to_save["fullName"] = person_name
+            
+            if date_of_birth:
+                details_to_save["dateOfBirth"] = date_of_birth
+            
+            if gender:
+                details_to_save["gender"] = gender
+            
+            if father_name:
+                details_to_save["fatherName"] = father_name
+            
+            # Save additional details if any
+            if details_to_save:
+                details_to_save["mobileNumber"] = phone_number
+                basic_response = self.api_client.save_basic_details(user_id, details_to_save)
+                
+                if basic_response.get("status") != 200:
+                    logger.warning(f"Failed to save additional PAN details: {basic_response}")
+                    # Continue anyway as PAN card number was saved successfully
+            
+            # Update session with extracted data
+            SessionManager.update_session_data_field(session_id, "data.panCard", pan_card_number)
+            if person_name:
+                SessionManager.update_session_data_field(session_id, "data.fullName", person_name)
+            if date_of_birth:
+                SessionManager.update_session_data_field(session_id, "data.dateOfBirth", date_of_birth)
+            if gender:
+                SessionManager.update_session_data_field(session_id, "data.gender", gender)
+            if father_name:
+                SessionManager.update_session_data_field(session_id, "data.fatherName", father_name)
+            
+            # Store OCR result in session
+            SessionManager.update_session_data_field(session_id, "data.pan_ocr_result", ocr_result)
+            
+            # Prepare success message
+            success_parts = [f"✅ PAN card number: {pan_card_number}"]
+            if person_name:
+                success_parts.append(f"Name: {person_name}")
+            if date_of_birth:
+                success_parts.append(f"Date of Birth: {date_of_birth}")
+            if gender:
+                success_parts.append(f"Gender: {gender}")
+            if father_name:
+                success_parts.append(f"Father's Name: {father_name}")
+            
+            success_message = " | ".join(success_parts)
+            
+            return {
+                'status': 'success',
+                'message': f'PAN card processed successfully! {success_message}',
+                'data': ocr_result
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in handle_pan_card_upload: {e}")
+            return {
+                'status': 'error',
+                'message': f'Error processing PAN card: {str(e)}'
+            }

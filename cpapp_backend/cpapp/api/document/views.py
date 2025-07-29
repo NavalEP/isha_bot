@@ -149,3 +149,158 @@ class AadhaarUploadView(APIView):
                 {'error': f'Upload error: {str(e)}'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class PanCardUploadView(APIView):
+    parser_classes = (MultiPartParser, FormParser)
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.document_service = DocumentService()
+        self.agent = CarepayAgent()
+    
+    def post(self, request):
+        """
+        Handle PAN card document upload and processing
+        """
+        try:
+            # Check if document file is uploaded
+            if 'document' not in request.FILES:
+                return Response(
+                    {'error': 'No file uploaded. Please select a PAN card document to upload.'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check if session_id is provided
+            session_id = request.data.get('session_id')
+            if not session_id:
+                return Response(
+                    {'error': 'Session ID is required. Please provide a valid session ID.'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Validate session_id format (should be a UUID)
+            try:
+                import uuid
+                uuid.UUID(session_id)
+            except ValueError:
+                return Response(
+                    {'error': 'Invalid session ID format. Please provide a valid session ID.'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            file_obj = request.FILES['document']
+            logger.info(f"Received PAN card file: {file_obj.name}, size: {file_obj.size} bytes")
+            tmp_path = None
+            
+            try:
+                # Validate file
+                is_valid, message = self.document_service.validate_file(file_obj)
+                if not is_valid:
+                    return Response(
+                        {'error': message}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                # Get file type
+                file_type = self.document_service.get_file_type(file_obj)
+                logger.info(f"Processing PAN card file of type: {file_type}")
+                
+                # Save to temporary file for OCR
+                with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_obj.name)[1]) as tmp:
+                    for chunk in file_obj.chunks():
+                        tmp.write(chunk)
+                    tmp_path = tmp.name
+                    logger.info(f"Saved temporary PAN card file: {tmp_path}")
+
+                # Convert PDF to image if needed
+                if file_type == 'application/pdf':
+                    try:
+                        logger.info("Converting PDF to image for PAN card")
+                        images = convert_from_path(tmp_path)
+                        if images:
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as img_tmp:
+                                images[0].save(img_tmp.name, 'JPEG')
+                                os.unlink(tmp_path)
+                                tmp_path = img_tmp.name
+                                logger.info(f"PAN card PDF converted to image: {tmp_path}")
+                    except Exception as e:
+                        logger.error(f"PAN card PDF conversion error: {e}")
+                        return Response(
+                            {'error': 'Failed to process PAN card PDF file'}, 
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                # Process the PAN card using OCR service
+                logger.info(f"Processing PAN card with OCR for session: {session_id}")
+                from cpapp.services.ocr_service import extract_pan_details
+                
+                ocr_result = extract_pan_details(tmp_path)
+                logger.info(f"PAN card OCR result: {ocr_result}")
+
+                
+                # Check if OCR was successful
+                if ocr_result and any(ocr_result.values()):
+                    # Save PAN details to session and API
+                    agent_result = self.agent.handle_pan_card_upload(tmp_path, session_id, ocr_result)
+                    logger.info(f"Agent PAN card processing result: {agent_result}")
+                    
+                    if agent_result.get('status') == 'success':
+                        return Response({
+                            'status': 'success',
+                            'message': 'PAN card processed successfully',
+                            'data': {
+                                'ocr_result': ocr_result,
+                                'pan_details_saved': True
+                            }
+                        })
+                    elif agent_result.get('status') == 'warning':
+                        return Response({
+                            'status': 'warning',
+                            'message': agent_result.get('message', 'PAN card processed with warnings'),
+                            'data': {
+                                'ocr_result': ocr_result,
+                                'pan_details_saved': True
+                            }
+                        })
+                    else:
+                        return Response({
+                            'status': 'error',
+                            'message': agent_result.get('message', 'Failed to save PAN card details'),
+                            'data': {
+                                'ocr_result': ocr_result,
+                                'pan_details_saved': False
+                            }
+                        }, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    return Response({
+                        'status': 'error',
+                        'message': 'Failed to extract PAN card details from the uploaded document',
+                        'data': {
+                            'ocr_result': ocr_result,
+                            'pan_details_saved': False
+                        }
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                
+            except Exception as e:
+                logger.error(f"PAN card processing error: {e}")
+                return Response(
+                    {'error': f'Error processing PAN card: {str(e)}'}, 
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+                
+            finally:
+                # Clean up temporary file
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                        logger.info(f"Cleaned up temporary PAN card file: {tmp_path}")
+                    except Exception as e:
+                        logger.error(f"Error deleting PAN card temp file: {e}")
+                        
+        except Exception as e:
+            logger.error(f"PAN card upload error: {e}")
+            return Response(
+                {'error': f'PAN card upload error: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

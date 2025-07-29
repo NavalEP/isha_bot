@@ -630,17 +630,9 @@ class CarepayAPIClient:
         """Save loan details"""
         endpoint = f"userDetails/saveLoanDetails"
         
-        # Use provided doctor details if available, otherwise use instance variables
-        doctor_id_to_use = loan_data.get("doctorId")
-        doctor_name_to_use = loan_data.get("doctorName")
-        
-        # Log a warning if we're using default doctor details
-        if not self.has_doctor_details and doctor_id_to_use is None and doctor_name_to_use is None:
-            logger.warning("Using default doctor details. Call get_doctor_details first to use actual details.")
-            
         data = {
-            "doctorId": doctor_id_to_use,
-            "doctorName": doctor_name_to_use,
+            "doctorId": loan_data.get("doctorId"),
+            "doctorName": loan_data.get("doctorName"),
             "formStatus": "",
             "loanAmount": loan_data.get("treatmentCost"),
             "treatmentAmount": loan_data.get("treatmentCost"),
@@ -653,18 +645,10 @@ class CarepayAPIClient:
     def save_change_treatment_cost_details(self, user_id: str, loan_data: Dict[str, Any]) -> Dict[str, Any]:
         """Save loan details"""
         endpoint = f"userDetails/saveLoanDetails"
-        
-        # Use provided doctor details if available, otherwise use instance variables
-        doctor_id_to_use = loan_data.get("doctorId")
-        doctor_name_to_use = loan_data.get("doctorName")
-        
-        # Log a warning if we're using default doctor details
-        if not self.has_doctor_details and doctor_id_to_use is None and doctor_name_to_use is None:
-            logger.warning("Using default doctor details. Call get_doctor_details first to use actual details.")
-            
+          
         data = {
-            "doctorId": doctor_id_to_use,
-            "doctorName": doctor_name_to_use,
+            "doctorId": loan_data.get("doctorId"),
+            "doctorName": loan_data.get("doctorName"),
             "formStatus": "",
             "loanAmount": loan_data.get("treatmentCost"),
             "treatmentAmount": loan_data.get("treatmentCost"),
@@ -674,8 +658,9 @@ class CarepayAPIClient:
         }
         return self._make_request('POST', endpoint, data=data)
     
-    def save_basic_details(self, user_id: str, details: Dict[str, Any]) -> Dict[str, Any]:
+    def save_change_date_of_birth_details(self, user_id: str, details: Dict[str, Any]) -> Dict[str, Any]:
         """Save basic personal details"""
+        
         endpoint = f"userDetails/basicDetail"
         data = {
            
