@@ -12,11 +12,17 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from pathlib import Path
 import os
+import sys
 
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Add the project root to the Python path and setup environment
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from setup_env import setup_environment
+setup_environment()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -34,7 +40,7 @@ MOCK_API = os.getenv('MOCK_API', 'true')
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-qa=jz*72l$4oz%e_%k$e08wq^f38g(0-zt$g&hxrf_-gp@3+8-')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
 # ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', '34.131.33.60', 'loanbot.carepay.money']

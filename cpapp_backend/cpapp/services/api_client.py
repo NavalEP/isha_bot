@@ -361,9 +361,6 @@ class CarepayAPIClient:
         doctor_id_to_use = loan_data.get("doctorId")
         doctor_name_to_use = loan_data.get("doctorName")
         
-        # Log a warning if we're using default doctor details
-        if not self.has_doctor_details and doctor_id_to_use is None and doctor_name_to_use is None:
-            logger.warning("Using default doctor details. Call get_doctor_details first to use actual details.")
             
         data = {
             "doctorId": doctor_id_to_use,
@@ -636,9 +633,6 @@ class CarepayAPIClient:
         doctor_id_to_use = loan_data.get("doctorId")
         doctor_name_to_use = loan_data.get("doctorName")
         
-        # Log a warning if we're using default doctor details
-        if not self.has_doctor_details and doctor_id_to_use is None and doctor_name_to_use is None:
-            logger.warning("Using default doctor details. Call get_doctor_details first to use actual details.")
             
         data = {
             "doctorId": doctor_id_to_use,
@@ -660,9 +654,6 @@ class CarepayAPIClient:
         doctor_id_to_use = loan_data.get("doctorId")
         doctor_name_to_use = loan_data.get("doctorName")
         
-        # Log a warning if we're using default doctor details
-        if not self.has_doctor_details and doctor_id_to_use is None and doctor_name_to_use is None:
-            logger.warning("Using default doctor details. Call get_doctor_details first to use actual details.")
             
         data = {
             "doctorId": doctor_id_to_use,

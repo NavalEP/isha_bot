@@ -19,13 +19,9 @@ from langchain_core.tools import ArgsSchema
 from cpapp.services.api_client import CarepayAPIClient
 from cpapp.models.session_data import SessionData
 from cpapp.services.session_manager import SessionManager
-from setup_env import setup_environment
 from cpapp.services.helper import Helper
 from cpapp.services.url_shortener import shorten_url
 from cpapp.services.ocr_service import extract_aadhaar_details
-
-
-setup_environment()
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
@@ -56,6 +52,40 @@ class CarepayAgent:
         self.system_prompt = """
         You are a healthcare loan application assistant for CarePay. Your role is to help users apply for loans for medical treatments in a professional and friendly manner.
 
+        CRITICAL TOOL USAGE RULE: You MUST call the appropriate tools to save or update data. Do NOT generate success messages without calling the tools first. When a user provides information that needs to be saved, IMMEDIATELY call the corresponding tool.
+        
+        CRITICAL: NEVER respond with success messages like "Your X has been successfully updated" without first calling the appropriate tool. You MUST call the tool first, then use the tool's response to inform the user.
+        
+        CRITICAL TOOL CALLING RULE: When a user provides any information that needs to be saved (gender, marital status, education level, treatment reason, treatment cost, date of birth), you MUST call the corresponding tool. Do NOT generate any response until you have called the tool. The tool's response will tell you what to say to the user.
+        
+        CRITICAL TREATMENT REASON HANDLING: When a user provides a treatment reason like "hair transplant", "dental surgery", etc., you MUST call the correct_treatment_reason tool immediately. Do NOT ask for confirmation or additional information - just call the tool with the provided treatment reason.
+        
+        CRITICAL TREATMENT COST HANDLING: When a user provides a treatment cost like "5000", "10000", "90000", etc., you MUST call the correct_treatment_cost tool immediately. Do NOT ask for confirmation or additional information - just call the tool with the provided treatment cost amount. If the user provides a numeric value that looks like a treatment cost, call the tool immediately.
+        
+        CRITICAL RESPONSE GENERATION RULE: You are FORBIDDEN from generating success messages like "Your X has been successfully updated" without first calling the appropriate tool. You MUST call the tool first, then use the tool's response to determine what to tell the user. If the tool returns an error, tell the user about the error. If the tool returns success, tell the user about the success.
+        
+        CRITICAL TOOL CALLING ENFORCEMENT: When a user provides ANY information that needs to be saved (treatment cost, treatment reason, gender, marital status, education level, date of birth), you MUST call the corresponding tool BEFORE generating any response. NEVER generate a success message without calling the tool first. This is a CRITICAL rule that must be followed.
+        
+        CRITICAL TREATMENT COST ENFORCEMENT: When a user provides a numeric value like "90000" after you ask for treatment cost, you MUST call the correct_treatment_cost tool immediately. Do NOT generate a success message like "Your treatment cost has been successfully updated" without calling the tool first. This is a CRITICAL error that must be avoided.
+        
+        CRITICAL SCENARIO: If you ask "To change your treatment cost, please provide the new treatment cost amount" and the user responds with a number like "90000", you MUST call the correct_treatment_cost tool with "90000" as the parameter. Do NOT respond with "Your treatment cost has been successfully updated to ₹90,000" without calling the tool first.
+        
+        CRITICAL ERROR PATTERN TO AVOID: 
+        - DO NOT generate: "Your treatment cost has been successfully updated to ₹90,000"
+        - DO NOT generate: "Your X has been successfully updated"
+        - DO NOT generate any success message without calling the appropriate tool first
+        - ALWAYS call the tool first, then use the tool's response to inform the user
+        - DO NOT ask for Aadhaar upload after Aadhaar has already been successfully processed
+        - DO NOT repeat "Please upload your Aadhaar card" after Aadhaar upload is complete
+        
+        CRITICAL TREATMENT COST TOOL CALLING:
+        - When user provides treatment cost: call correct_treatment_cost tool
+        - When user provides treatment reason: call correct_treatment_reason tool
+        - When user provides gender: call save_gender_details tool
+        - When user provides marital status: call save_marital_status_details tool
+        - When user provides education level: call save_education_level_details tool
+        - When user provides date of birth: call correct_date_of_birth tool
+
         CRITICAL MESSAGE FORMATTING RULES:
         1. NEVER modify, truncate, or duplicate any formatted messages
         2. Keep ALL markdown formatting (###, **, etc.) exactly as provided
@@ -72,12 +102,14 @@ class CarepayAgent:
 
         CRITICAL EXECUTION RULE: You MUST execute ALL steps in sequence. Do NOT stop until you reach step 10. If any step succeeds, immediately proceed to the next step.
 
-        If the user wants to change, correct, or update any of these required fields: treatment reason, treatment cost, or date of birth, you MUST use the appropriate tool ONLY when the session status is "additional_details_completed" (after the application process is complete):
+        If the user wants to change, correct, or update any of these required fields: treatment reason, treatment cost, or date of birth, you MUST use the appropriate tool:
         - Use correct_treatment_reason tool to update the treatment reason.
         - Use correct_treatment_cost tool to update the treatment cost.
         - Use correct_date_of_birth tool to update the date of birth.
-        - CRITICAL: These correction tools will only work after the user has completed the entire application process and the session status is "additional_details_completed".
-        - If the user tries to make corrections before completing the application, inform them they need to complete the application first.
+        - CRITICAL: These correction tools will only work after the user has completed the entire application process.
+        - CRITICAL: When a user provides a new treatment reason (like "hair transplant", "dental surgery", etc.), immediately call the correct_treatment_reason tool with that value.
+        - CRITICAL: When a user provides a new treatment cost (like "5000", "10000", etc.), immediately call the correct_treatment_cost tool with that value.
+        - CRITICAL: When a user provides a new date of birth (like "1990-01-15"), immediately call the correct_date_of_birth tool with that value.
 
         Follow these steps sequentially to process a loan application: and don't miss any step and any tool calling
 
@@ -204,6 +236,34 @@ class CarepayAgent:
 
         CRITICAL: NEVER deviate from these exact steps and templates. Do not add, modify, or skip any steps.
         
+        CRITICAL CORRECTION HANDLING:
+        - When a user says they want to change treatment reason, treatment cost, or date of birth, ask them to provide the new value
+        - When they provide the new value, IMMEDIATELY call the appropriate correction tool
+        - Do NOT ask for confirmation or additional information - just call the tool with the provided value
+        - Examples:
+          * User: "I want to change treatment reason" → Ask: "Please provide the new treatment reason"
+          * User: "hair transplant" → IMMEDIATELY call correct_treatment_reason tool with "hair transplant"
+          * User: "I want to change treatment cost" → Ask: "Please provide the new treatment cost"
+          * User: "5000" → IMMEDIATELY call correct_treatment_cost tool with "5000"
+          * User: "90000" → IMMEDIATELY call correct_treatment_cost tool with "90000"
+        
+        CRITICAL DETAIL UPDATE HANDLING:
+        - When a user provides gender selection (Male, Female, 1, 2), IMMEDIATELY call save_gender_details tool
+        - When a user provides marital status selection (Married, Unmarried/Single, Yes, No, 1, 2), IMMEDIATELY call save_marital_status_details tool
+        - When a user provides education level selection (P.H.D, Graduation, Post graduation, etc.), IMMEDIATELY call save_education_level_details tool
+        - Do NOT generate success messages without calling the tools - ALWAYS call the appropriate tool first
+        - The tools will automatically format the data to the correct API format
+        - Examples:
+          * User: "Male" → IMMEDIATELY call save_gender_details tool with "Male"
+          * User: "Unmarried/Single" → IMMEDIATELY call save_marital_status_details tool with "Unmarried/Single" (will be formatted to "No")
+          * User: "P.H.D" → IMMEDIATELY call save_education_level_details tool with "P.H.D" (will be formatted to "P.H.D.")
+        
+        CRITICAL EDUCATION LEVEL MAPPING:
+        - When user provides education level, pass it exactly as provided to the save_education_level_details tool
+        - The system will automatically format it to the correct API format
+        - Examples: "P.H.D", "Graduation", "Post graduation", "Diploma", "Passed 12th", "Passed 10th", "Less than 10th"
+        - The tool will handle formatting to: "LESS THAN 10TH", "PASSED 10TH", "PASSED 12TH", "DIPLOMA", "GRADUATION", "POST GRADUATION", "P.H.D."
+        
         CRITICAL DATA VALIDATION:
         - After get_prefill_data returns status 200, BEFORE proceeding to step 7:
           * Check if gender field is missing (empty string "" or null)
@@ -221,6 +281,7 @@ class CarepayAgent:
         - If you see "status": 200 in get_prefill_data response, you MUST complete steps 7-10
         - If you see "status": 200 in get_prefill_data response, you are FORBIDDEN from asking for Aadhaar upload
         - The only valid response for Aadhaar upload is when get_prefill_data returns status 500 with "phoneToPrefill_failed"
+        - NEVER ask for Aadhaar upload if Aadhaar has already been processed (check for ocr_result in session)
         - NEVER assume or guess user's gender - ALWAYS ask the user directly
         - NEVER use name, age, or any other data to determine gender
         - The ONLY way to get gender is to ask the user: "Please select your gender:\n1. Male\n2. Female\nPlease enter 1 or 2 only"
@@ -236,6 +297,14 @@ class CarepayAgent:
         CRITICAL WORKFLOW SEPARATION:
         - WORKFLOW A (Normal Flow): When get_prefill_data returns status 200, you MUST continue with steps 7-10 regardless of any step failures
         - WORKFLOW B (Aadhaar Upload Flow): ONLY when get_prefill_data returns status 500 with "phoneToPrefill_failed" error
+        
+        CRITICAL AADHAAR PROCESSING HANDLING:
+        - If get_prefill_data returns status 200 with "aadhaar_processed": true, this means Aadhaar has already been uploaded and processed
+        - In this case, proceed with WORKFLOW A (Normal Flow) and continue to steps 7-10
+        - Do NOT ask for Aadhaar upload again if Aadhaar has already been processed
+        - The system automatically detects when Aadhaar has been processed and returns status 200
+        - CRITICAL: After Aadhaar upload is successful, the next get_prefill_data call will return status 200, NOT status 500
+        - CRITICAL: Do NOT repeat the Aadhaar upload request after Aadhaar has been successfully processed
         - CRITICAL: NEVER mix these workflows - if get_prefill_data returns status 200, you are in WORKFLOW A and must complete steps 7-10
         - CRITICAL: Even if get_employment_verification fails (status 500), continue with save_employment_details and get_bureau_decision in WORKFLOW A
         - CRITICAL: Do NOT ask for Aadhaar upload in WORKFLOW A - that is only for WORKFLOW B
@@ -606,9 +675,6 @@ class CarepayAgent:
             correction_keywords = ["change", "correct", "update", "modify", "edit", "wrong", "mistake"]
             is_correction_request = any(keyword in message.lower() for keyword in correction_keywords)
             
-            if is_correction_request and current_status != "additional_details_completed":
-                ai_message = "❌ Corrections are only allowed after you have completed your loan application. Please complete the application process first, then you can make any necessary corrections."
-                logger.info(f"User attempted correction before application completion. Session status: {current_status}")
             
             # Otherwise, just update the conversation history and return
             self._update_session_history(session_id, message, ai_message)
@@ -925,6 +991,20 @@ class CarepayAgent:
             
             if not user_id:
                 return "User ID is required to get prefill data"
+            
+            # Check if Aadhaar has already been processed and stored
+            ocr_result = session.get("data", {}).get("ocr_result")
+            if ocr_result and ocr_result.get("name") and ocr_result.get("aadhaar_number"):
+                logger.info(f"Aadhaar already processed for user_id: {user_id}, proceeding with prefill data")
+                # Aadhaar has been processed, so we should proceed with the normal flow
+                # Return a mock 200 response to indicate success
+                return json.dumps({
+                    "status": 200,
+                    "data": {
+                        "message": "Aadhaar data already processed, proceeding with application",
+                        "aadhaar_processed": True
+                    }
+                })
                 
             result = self.api_client.get_prefill_data(user_id)
             # Store the complete API response in session data
@@ -2534,7 +2614,8 @@ Please check your application status by visiting the following:
         Returns:
             List of tools with session_id bound
         """
-        return [
+        logger.info(f"Creating session-aware tools for session_id: {session_id}")
+        tools = [
             StructuredTool.from_function(
                 func=lambda fullName, phoneNumber, treatmentCost, monthlyIncome: self.store_user_data_structured(fullName, phoneNumber, treatmentCost, monthlyIncome, session_id),
                 name="store_user_data",
@@ -2623,34 +2704,36 @@ Please check your application status by visiting the following:
             Tool(
                 name="save_gender_details",
                 func=lambda gender: self.save_gender_details(gender, session_id),
-                description="Save user's gender details. Use this when user provides their gender information.",
+                description="Save user's gender details. Use this when user provides their gender information like 'Male', 'Female', '1', or '2'. Call this tool immediately when user provides gender selection.",
             ),
             Tool(
                 name="save_marital_status_details",
                 func=lambda marital_status: self.save_marital_status_details(marital_status, session_id),
-                description="Save user's marital status details. Use this when user provides their marital status information.",
+                description="Save user's marital status details. Use this when user provides their marital status information like 'Married', 'Unmarried/Single', 'Yes', 'No', '1', or '2'. The system will automatically format it to the correct API format (Yes/No). Call this tool immediately when user provides marital status selection.",
             ),
             Tool(
                 name="save_education_level_details",
                 func=lambda education_level: self.save_education_level_details(education_level, session_id),
-                description="Save user's education level details. Use this when user provides their education level information.",
+                description="Save user's education level details. Use this when user provides their education level information like 'P.H.D', 'Graduation', 'Post graduation', 'Diploma', 'Passed 12th', 'Passed 10th', 'Less than 10th', or numbers 1-7. The system will automatically format it to the correct API format (LESS THAN 10TH, PASSED 10TH, etc.). Call this tool immediately when user provides education level selection.",
             ),
             Tool(
                 name="correct_treatment_reason",
                 func=lambda new_treatment_reason: self.correct_treatment_name(new_treatment_reason, session_id),
-                description="Correct/update the treatment name in the loan application. Use this when user wants to change their treatment name. ONLY works after application completion (status: additional_details_completed).",
+                description="Correct/update the treatment reason in the loan application. Use this when user provides a new treatment reason like 'hair transplant', 'dental surgery', etc. Call this tool immediately when user provides a treatment reason.",
             ),
             Tool(
                 name="correct_treatment_cost",
                 func=lambda new_treatment_cost: self.correct_treatment_cost(new_treatment_cost, session_id),
-                description="Correct/update the treatment cost in the loan application. Use this when user wants to change their treatment cost (must be >= ₹3,000). ONLY works after application completion (status: additional_details_completed).",
+                description="Correct/update the treatment cost in the loan application. Use this when user provides a new treatment cost like '5000', '10000', '90000', etc. (must be >= ₹3,000). Call this tool immediately when user provides a numeric treatment cost amount.",
             ),
             Tool(
                 name="correct_date_of_birth",
                 func=lambda new_date_of_birth: self.correct_date_of_birth(new_date_of_birth, session_id),
-                description="Correct/update the date of birth in the user profile. Use this when user wants to change their date of birth (format: YYYY-MM-DD). ONLY works after application completion (status: additional_details_completed).",
+                description="Correct/update the date of birth in the user profile. Use this when user wants to change their date of birth (format: YYYY-MM-DD).",
             ),
         ]
+        logger.info(f"Created {len(tools)} tools for session {session_id}")
+        return tools
 
     def _determine_loan_decision(self, session_id: str, profile_link: str, fibe_link: str = None) -> Dict[str, str]:
         """
@@ -3182,7 +3265,7 @@ Please Enter input 1 or 2 only"""
 
     def handle_pan_card_number(self, pan_number: str, session_id: str) -> dict:
         """
-        Handle PAN card number input and save it to the system
+        Handle PAN card number input and save it to the system, with PAN validation
         
         Args:
             pan_number: PAN card number provided by user
@@ -3192,6 +3275,15 @@ Please Enter input 1 or 2 only"""
             Dictionary with status and message
         """
         try:
+            # Validate PAN card number format before processing
+            import re
+            pan_pattern = r'^[A-Z]{5}[0-9]{4}[A-Z]$'
+            if not pan_number or not re.match(pan_pattern, pan_number.strip().upper()):
+                return {
+                    'status': 'error',
+                    'message': "Please provide a valid PAN card number (e.g., ABCDE1234F)."
+                }
+
             # Get session data
             session_data = SessionManager.get_session_from_db(session_id)
             if not session_data:
@@ -3553,6 +3645,7 @@ Please Enter input 1 or 2 only"""
         Returns:
             Save result as JSON string
         """
+        logger.info(f"save_gender_details called with: gender='{gender}', session_id='{session_id}'")
         try:
             # Get user ID from session
             session = SessionManager.get_session_from_db(session_id)
@@ -3602,6 +3695,7 @@ Please Enter input 1 or 2 only"""
         Returns:
             Save result as JSON string
         """
+        logger.info(f"save_marital_status_details called with: marital_status='{marital_status}', session_id='{session_id}'")
         try:
             # Get user ID from session
             session = SessionManager.get_session_from_db(session_id)
@@ -3615,9 +3709,13 @@ Please Enter input 1 or 2 only"""
             # Get mobile number from session
             mobile_number = session.get("data", {}).get("mobileNumber") or session.get("data", {}).get("phoneNumber")
 
+            # Format marital status to correct API format
+            formatted_marital_status = self._format_marital_status(marital_status)
+            logger.info(f"Formatted marital status: '{marital_status}' -> '{formatted_marital_status}'")
+
             # Prepare data for API
             details = {
-                "maritalStatus": marital_status,
+                "maritalStatus": formatted_marital_status,
                 "mobileNumber": mobile_number,
                 "userId": user_id
             }
@@ -3651,6 +3749,7 @@ Please Enter input 1 or 2 only"""
         Returns:
             Save result as JSON string
         """
+        logger.info(f"save_education_level_details called with: education_level='{education_level}', session_id='{session_id}'")
         try:
             # Get user ID from session
             session = SessionManager.get_session_from_db(session_id)
@@ -3664,9 +3763,13 @@ Please Enter input 1 or 2 only"""
             # Get mobile number from session
             mobile_number = session.get("data", {}).get("mobileNumber") or session.get("data", {}).get("phoneNumber")
 
+            # Format education level to correct API format
+            formatted_education_level = self._format_education_level(education_level)
+            logger.info(f"Formatted education level: '{education_level}' -> '{formatted_education_level}'")
+
             # Prepare data for API
             details = {
-                "educationLevel": education_level,
+                "educationLevel": formatted_education_level,
                 "mobileNumber": mobile_number,
                 "userId": user_id
             }
@@ -3691,25 +3794,21 @@ Please Enter input 1 or 2 only"""
 
     def correct_treatment_name(self, new_treatment_reason: str, session_id: str) -> str:
         """
-        Correct/update the treatment name in the loan application
+        Correct/update the treatment reason in the loan application
         
         Args:
-            new_treatment_name: The new/corrected treatment name
+            new_treatment_reason: The new/corrected treatment reason
             session_id: Session ID to get user data from
             
         Returns:
             Success or error message
         """
+        logger.info(f"correct_treatment_name called with: new_treatment_reason='{new_treatment_reason}', session_id='{session_id}'")
         try:
             # Get session data
             session_data = SessionManager.get_session_from_db(session_id)
             if not session_data:
                 return "❌ Error: Session not found. Please start a new conversation."
-            
-            # Check if session status allows corrections
-            session_status = session_data.get('status', '')
-            if session_status != "additional_details_completed":
-                return "❌ Error: Corrections are only allowed after the application process is complete. Please complete your application first."
             
             user_data = session_data.get('data', {})
             user_id = user_data.get('userId')
@@ -3717,10 +3816,14 @@ Please Enter input 1 or 2 only"""
             if not user_id:
                 return "❌ Error: User ID not found in session. Please complete the initial setup first."
             
+            # Try to get doctor_id and doctor_name from session
+            doctor_id = user_data.get('doctorId') or user_data.get('doctor_id')
+            doctor_name = user_data.get('doctorName') or user_data.get('doctor_name')
+            
             # Get existing loan data from session
             loan_data = {
-                "doctorId": user_data.get('doctorId'),
-                "doctorName": user_data.get('doctorName'),
+                "doctorId": doctor_id,
+                "doctorName": doctor_name,
                 "treatmentCost": user_data.get('treatmentCost'),
                 "loanReason": new_treatment_reason,
                 "fullName": user_data.get('fullName')
@@ -3730,10 +3833,10 @@ Please Enter input 1 or 2 only"""
             response = self.api_client.save_change_treatment_name_details(user_id, loan_data)
             
             if response.get("status") == 200:
-                # Update session with new treatment name
-                SessionManager.update_session_data_field(session_id, "data.fullName", new_treatment_reason)
+                # Update session with new treatment reason
+                SessionManager.update_session_data_field(session_id, "data.treatmentReason", new_treatment_reason)
                 
-                return f"✅ Treatment name has been successfully updated to '{new_treatment_reason}'!"
+                return f"✅ Treatment reason has been successfully updated to '{new_treatment_reason}'!"
             else:
                 error_msg = response.get("error", "Unknown error occurred")
                 logger.error(f"Failed to update treatment name: {error_msg}")
@@ -3743,7 +3846,7 @@ Please Enter input 1 or 2 only"""
             logger.error(f"Error in correct_treatment_name: {e}")
             return f"❌ Error: {str(e)}"
 
-    def correct_treatment_cost(self, new_treatment_cost: int, session_id: str) -> str:
+    def correct_treatment_cost(self, new_treatment_cost, session_id: str) -> str:
         """
         Correct/update the treatment cost in the loan application
         
@@ -3754,7 +3857,14 @@ Please Enter input 1 or 2 only"""
         Returns:
             Success or error message
         """
+        logger.info(f"correct_treatment_cost called with: new_treatment_cost='{new_treatment_cost}', session_id='{session_id}'")
         try:
+            # Convert to integer if it's a string
+            try:
+                new_treatment_cost = int(new_treatment_cost)
+            except (ValueError, TypeError):
+                return "❌ Error: Please enter a valid numeric amount for the treatment cost."
+            
             # Validate treatment cost
             if new_treatment_cost < 3000:
                 return "❌ Error: Treatment cost must be ₹3,000 or more. Please enter a valid amount."
@@ -3764,25 +3874,24 @@ Please Enter input 1 or 2 only"""
             if not session_data:
                 return "❌ Error: Session not found. Please start a new conversation."
             
-            # Check if session status allows corrections
-            session_status = session_data.get('status', '')
-            if session_status != "additional_details_completed":
-                return "❌ Error: Corrections are only allowed after the application process is complete. Please complete your application first."
-            
             user_data = session_data.get('data', {})
             user_id = user_data.get('userId')
             
             if not user_id:
                 return "❌ Error: User ID not found in session. Please complete the initial setup first."
             
+            # Get doctor_id and doctor_name from session (handle both possible keys)
+            doctor_id = user_data.get('doctorId') or user_data.get('doctor_id')
+            doctor_name = user_data.get('doctorName') or user_data.get('doctor_name')
+
             # Get treatment_reason from additional_details if available
             additional_details = user_data.get('additional_details', {})
             treatment_reason = additional_details.get('treatment_reason', '')
 
             # Get existing loan data from session, using treatment_reason from additional_details
             loan_data = {
-                "doctorId": user_data.get('doctorId'),
-                "doctorName": user_data.get('doctorName'),
+                "doctorId": doctor_id,
+                "doctorName": doctor_name,
                 "treatmentCost": new_treatment_cost,  # Use the new treatment cost
                 "loanReason": treatment_reason,
                 "fullName": user_data.get('fullName')
@@ -3828,10 +3937,6 @@ Please Enter input 1 or 2 only"""
             if not session_data:
                 return "❌ Error: Session not found. Please start a new conversation."
             
-            # Check if session status allows corrections
-            session_status = session_data.get('status', '')
-            if session_status != "additional_details_completed":
-                return "❌ Error: Corrections are only allowed after the application process is complete. Please complete your application first."
             
             user_data = session_data.get('data', {})
             user_id = user_data.get('userId')
@@ -4007,3 +4112,138 @@ Please Enter input 1 or 2 only"""
                 'status': 'error',
                 'message': f'Error processing PAN card: {str(e)}'
             }
+
+    def _format_marital_status(self, marital_status: str) -> str:
+        """
+        Format marital status to the correct API format
+        
+        Args:
+            marital_status: Raw marital status input
+            
+        Returns:
+            Formatted marital status for API
+        """
+        if not marital_status:
+            return "No"
+        
+        # Convert to lowercase for easier comparison
+        status_lower = marital_status.lower().strip()
+        
+        # Map various inputs to correct API format
+        married_variants = ["married", "yes", "1", "marriage"]
+        unmarried_variants = ["unmarried", "single", "no", "2", "unmarried/single", "unmarried/single", "unmarried or single"]
+        
+        if status_lower in married_variants:
+            return "Yes"
+        elif status_lower in unmarried_variants:
+            return "No"
+        else:
+            # If it's already in correct format, return as-is
+            if marital_status in ["Yes", "No"]:
+                return marital_status
+            # Default to "No" for unrecognized values
+            logger.warning(f"Unrecognized marital status: '{marital_status}', defaulting to 'No'")
+            return "No"
+
+    def _format_education_level(self, education_level: str) -> str:
+        """
+        Format education level to the correct API format
+        
+        Args:
+            education_level: Raw education level input
+            
+        Returns:
+            Formatted education level for API
+        """
+        if not education_level:
+            return "LESS THAN 10TH"
+        
+        # Convert to lowercase for easier comparison
+        level_lower = education_level.lower().strip()
+        
+        # Map various inputs to correct API format
+        education_mapping = {
+            # Number mappings
+            "1": "LESS THAN 10TH",
+            "2": "PASSED 10TH", 
+            "3": "PASSED 12TH",
+            "4": "DIPLOMA",
+            "5": "GRADUATION",
+            "6": "POST GRADUATION",
+            "7": "P.H.D.",
+            
+            # Text mappings
+            "less than 10th": "LESS THAN 10TH",
+            "less than 10": "LESS THAN 10TH",
+            "below 10th": "LESS THAN 10TH",
+            "below 10": "LESS THAN 10TH",
+            "under 10th": "LESS THAN 10TH",
+            "under 10": "LESS THAN 10TH",
+            
+            "passed 10th": "PASSED 10TH",
+            "10th": "PASSED 10TH",
+            "10th standard": "PASSED 10TH",
+            "sslc": "PASSED 10TH",
+            
+            "passed 12th": "PASSED 12TH",
+            "12th": "PASSED 12TH",
+            "12th standard": "PASSED 12TH",
+            "hsc": "PASSED 12TH",
+            "higher secondary": "PASSED 12TH",
+            
+            "diploma": "DIPLOMA",
+            "diploma course": "DIPLOMA",
+            
+            "graduation": "GRADUATION",
+            "graduate": "GRADUATION",
+            "bachelor": "GRADUATION",
+            "bachelor's": "GRADUATION",
+            "bachelors": "GRADUATION",
+            "b.tech": "GRADUATION",
+            "b.e": "GRADUATION",
+            "b.com": "GRADUATION",
+            "b.sc": "GRADUATION",
+            "b.a": "GRADUATION",
+            "b.b.a": "GRADUATION",
+            "b.c.a": "GRADUATION",
+            
+            "post graduation": "POST GRADUATION",
+            "post graduate": "POST GRADUATION",
+            "postgraduate": "POST GRADUATION",
+            "master": "POST GRADUATION",
+            "master's": "POST GRADUATION",
+            "masters": "POST GRADUATION",
+            "m.tech": "POST GRADUATION",
+            "m.e": "POST GRADUATION",
+            "m.com": "POST GRADUATION",
+            "m.sc": "POST GRADUATION",
+            "m.a": "POST GRADUATION",
+            "m.b.a": "POST GRADUATION",
+            "m.c.a": "POST GRADUATION",
+            
+            "p.h.d": "P.H.D.",
+            "phd": "P.H.D.",
+            "doctorate": "P.H.D.",
+            "doctor of philosophy": "P.H.D.",
+            "ph.d": "P.H.D.",
+            "ph.d.": "P.H.D.",
+        }
+        
+        # Check if it's already in correct format
+        if education_level in ["LESS THAN 10TH", "PASSED 10TH", "PASSED 12TH", "DIPLOMA", "GRADUATION", "POST GRADUATION", "P.H.D."]:
+            return education_level
+        
+        # Try to find a match
+        for key, value in education_mapping.items():
+            if level_lower == key.lower():
+                return value
+        
+        # If no exact match, try partial matching
+        for key, value in education_mapping.items():
+            if key.lower() in level_lower or level_lower in key.lower():
+                logger.info(f"Partial match found for education level: '{education_level}' -> '{value}'")
+                return value
+        
+        # Default to "LESS THAN 10TH" for unrecognized values
+        logger.warning(f"Unrecognized education level: '{education_level}', defaulting to 'LESS THAN 10TH'")
+        return "LESS THAN 10TH"
