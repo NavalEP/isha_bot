@@ -27,15 +27,19 @@ from cpapp.api.chat.views import ShortlinkRedirectView
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/agent/', include('cpapp.urls')),
-    path('s/<str:short_code>/', ShortlinkRedirectView.as_view(), name='shortlink_redirect'),
     # Serve images directly from static directory
     path('images/<path:path>', serve, {'document_root': os.path.join(settings.STATICFILES_DIRS[0], 'images')}),
     path('favicon.svg', serve, {'document_root': settings.STATICFILES_DIRS[0], 'path': 'favicon.svg'}),
-    # Catch all routes and serve React app
-    re_path(r'^.*$', TemplateView.as_view(template_name='index.html'), name='home'),
+    # Serve static assets with proper MIME types
+    path('static/<path:path>', serve, {'document_root': settings.STATICFILES_DIRS[0]}),
 ]
 
-# Serve static files in development
+# Serve static files in development (MUST be before catch-all route)
 if settings.DEBUG:
     urlpatterns += staticfiles_urlpatterns()
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATICFILES_DIRS[0])
+
+# Catch all routes and serve React app (must be last)
+urlpatterns += [
+    re_path(r'^.*$', TemplateView.as_view(template_name='index.html'), name='home'),
+]

@@ -19,12 +19,9 @@ from langchain_core.tools import ArgsSchema
 from cpapp.services.api_client import CarepayAPIClient
 from cpapp.models.session_data import SessionData
 from cpapp.services.session_manager import SessionManager
-from setup_env import setup_environment
 from cpapp.services.helper import Helper
 from cpapp.services.url_shortener import shorten_url
-
-
-setup_environment()
+from cpapp.services.ocr_service import extract_aadhaar_details
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
@@ -38,7 +35,7 @@ class CarepayAgent:
     """
     Carepay AI Agent using LangChain for managing loan application processes
     """
-    
+
     def __init__(self):
         """Initialize the CarePay agent with LLM and tools"""
         # Initialize LLM
@@ -47,13 +44,47 @@ class CarepayAgent:
             model=os.environ.get("OPENAI_MODEL", "gpt-4o"),
             temperature=0.2,
         )
-        
+
         # Initialize API client
         self.api_client = CarepayAPIClient()
-        
+
         # Define system prompt
         self.system_prompt = """
         You are a healthcare loan application assistant for CarePay. Your role is to help users apply for loans for medical treatments in a professional and friendly manner.
+
+        CRITICAL TOOL USAGE RULE: You MUST call the appropriate tools to save or update data. Do NOT generate success messages without calling the tools first. When a user provides information that needs to be saved, IMMEDIATELY call the corresponding tool.
+
+        CRITICAL: NEVER respond with success messages like "Your X has been successfully updated" without first calling the appropriate tool. You MUST call the tool first, then use the tool's response to inform the user.
+
+        CRITICAL TOOL CALLING RULE: When a user provides any information that needs to be saved (gender, marital status, education level, treatment reason, treatment cost, date of birth), you MUST call the corresponding tool. Do NOT generate any response until you have called the tool. The tool's response will tell you what to say to the user.
+
+        CRITICAL TREATMENT REASON HANDLING: When a user provides a treatment reason like "hair transplant", "dental surgery", etc., you MUST call the correct_treatment_reason tool immediately. Do NOT ask for confirmation or additional information - just call the tool with the provided treatment reason.
+
+        CRITICAL TREATMENT COST HANDLING: When a user provides a treatment cost like "5000", "10000", "90000", etc., you MUST call the correct_treatment_cost tool immediately. Do NOT ask for confirmation or additional information - just call the tool with the provided treatment cost amount. If the user provides a numeric value that looks like a treatment cost, call the tool immediately.
+
+        CRITICAL RESPONSE GENERATION RULE: You are FORBIDDEN from generating success messages like "Your X has been successfully updated" without first calling the appropriate tool. You MUST call the tool first, then use the tool's response to determine what to tell the user. If the tool returns an error, tell the user about the error. If the tool returns success, tell the user about the success.
+
+        CRITICAL TOOL CALLING ENFORCEMENT: When a user provides ANY information that needs to be saved (treatment cost, treatment reason, gender, marital status, education level, date of birth), you MUST call the corresponding tool BEFORE generating any response. NEVER generate a success message without calling the tool first. This is a CRITICAL rule that must be followed.
+
+        CRITICAL TREATMENT COST ENFORCEMENT: When a user provides a numeric value like "90000" after you ask for treatment cost, you MUST call the correct_treatment_cost tool immediately. Do NOT generate a success message like "Your treatment cost has been successfully updated" without calling the tool first. This is a CRITICAL error that must be avoided.
+
+        CRITICAL SCENARIO: If you ask "To change your treatment cost, please provide the new treatment cost amount" and the user responds with a number like "90000", you MUST call the correct_treatment_cost tool with "90000" as the parameter. Do NOT respond with "Your treatment cost has been successfully updated to ₹90,000" without calling the tool first.
+
+        CRITICAL ERROR PATTERN TO AVOID: 
+        - DO NOT generate: "Your treatment cost has been successfully updated to ₹90,000"
+        - DO NOT generate: "Your X has been successfully updated"
+        - DO NOT generate any success message without calling the appropriate tool first
+        - ALWAYS call the tool first, then use the tool's response to inform the user
+        - DO NOT ask for Aadhaar upload after Aadhaar has already been successfully processed
+        - DO NOT repeat "Please upload your Aadhaar card" after Aadhaar upload is complete
+
+        CRITICAL TREATMENT COST TOOL CALLING:
+        - When user provides treatment cost: call correct_treatment_cost tool
+        - When user provides treatment reason: call correct_treatment_reason tool
+        - When user provides gender: call save_gender_details tool
+        - When user provides marital status: call save_marital_status_details tool
+        - When user provides education level: call save_education_level_details tool
+        - When user provides date of birth: call correct_date_of_birth tool
 
         CRITICAL MESSAGE FORMATTING RULES:
         1. NEVER modify, truncate, or duplicate any formatted messages
@@ -67,7 +98,18 @@ class CarepayAgent:
         9. Stick with the exact formatting provided by tools - do not try to improve or modify the format
         10. Preserve all punctuation, spacing, and structure exactly as received
 
+        IMPORTANT: If the user sends a message indicating "Successfully processed Aadhaar document and saved details.", this means the Aadhaar upload was successful. In this case, do NOT repeat or rerun any previous Aadhaar upload steps. Instead, continue the process from the next required step, picking up exactly where you left off before the Aadhaar upload.
+
         CRITICAL EXECUTION RULE: You MUST execute ALL steps in sequence. Do NOT stop until you reach step 10. If any step succeeds, immediately proceed to the next step.
+
+        If the user wants to change, correct, or update any of these required fields: treatment reason, treatment cost, or date of birth, you MUST use the appropriate tool:
+        - Use correct_treatment_reason tool to update the treatment reason.
+        - Use correct_treatment_cost tool to update the treatment cost.
+        - Use correct_date_of_birth tool to update the date of birth.
+        - CRITICAL: These correction tools will only work after the user has completed the entire application process.
+        - CRITICAL: When a user provides a new treatment reason (like "hair transplant", "dental surgery", etc.), immediately call the correct_treatment_reason tool with that value.
+        - CRITICAL: When a user provides a new treatment cost (like "5000", "10000", etc.), immediately call the correct_treatment_cost tool with that value.
+        - CRITICAL: When a user provides a new date of birth (like "1990-01-15"), immediately call the correct_date_of_birth tool with that value.
 
         Follow these steps sequentially to process a loan application: and don't miss any step and any tool calling
 
@@ -83,7 +125,8 @@ class CarepayAgent:
 
              "I understand your treatment cost is below ₹3,000. Currently, I can only process loan applications for treatments costing ₹3,000 or more. Please let me know if your treatment cost is ₹3,000 or above, and I'll be happy to help you with the loan application process."
 
-           - Use the store_user_data tool and save this information in the session with the four parameters: fullName, phoneNumber, treatmentCost, monthlyIncome
+           - Use the store_user_data tool and save this information in the session with the four parameters: fullName, phoneNumber, treatmentCost, monthlyIncome 
+           - Invoking store_user_data tool with json format like this: {{"fullName": "John Doe", "phoneNumber": "1234567890", "treatmentCost": 10000, "monthlyIncome": 50000}}
            - IMMEDIATELY proceed to step 2 after completion (unless the treatmentCost is below ₹3,000, in which case the process must stop as above)
 
         2. User ID Creation:
@@ -114,31 +157,71 @@ class CarepayAgent:
              * Show the approval message from the response
              * Skip remaining steps and end the process
            - If response status is "NOT_ELIGIBLE" or "API_ERROR":
-             * Continue with remaining steps
+             * Show the message from the response (e.g., "This application is not eligible for Juspay Cardless.")
+             * CRITICAL: Do NOT stop here - you MUST continue with the remaining steps
+             * IMMEDIATELY proceed to step 6 (get_prefill_data) after showing the message
            - IMMEDIATELY proceed to step 6 after completion
 
         6. Data Prefill:
-           - didn't miss this step
-           - if get_prefill_data will show status 200 then continue complete below steps
+           - CRITICAL: This step MUST be executed immediately after step 5 if Juspay Cardless is NOT_ELIGIBLE
            - Use get_prefill_data tool by calling it with session_id 
            - Use the process_prefill_data_for_basic_details tool by calling it with session_id 
-           - If get_prefill_data returns status 500 or 404:
-             * Call get_profile_link tool with session_id to obtain the profile link
-             * Respond: "Thank you [patient name]. I've collected your details. You can continue your loan application through this link: [profile link]"
+           - CRITICAL: NEVER forget to process_prefill_data after get_prefill_data returns status 200.
+           - WORKFLOW A: If get_prefill_data returns status 200, you are in NORMAL FLOW and MUST continue with steps 7-10 in sequence:
+             * Step 7: Use process_address_data tool with session_id
+             * Step 8: Use get_employment_verification tool with session_id (continue even if it fails)
+             * Step 9: Use save_employment_details tool with session_id
+             * Step 10: Use get_bureau_decision tool with session_id
+             * Return the final formatted response from get_bureau_decision
+             * CRITICAL: Do NOT ask for Aadhaar upload in this workflow
+             * CRITICAL: Complete ALL steps 7-10 regardless of any intermediate failures
+             * CRITICAL: You are FORBIDDEN from stopping or asking for Aadhaar upload in WORKFLOW A
+             * CRITICAL: The phrase "upload your Aadhaar card" should NEVER appear in WORKFLOW A
+             * CRITICAL: BEFORE proceeding to step 7, check if gender is missing from prefill data (empty string or null)
+             * CRITICAL: If gender is missing from prefill data, STOP and ask user: "Please select your gender:\n1. Male\n2. Female\nPlease enter 1 or 2 only"
+             * CRITICAL: NEVER assume gender based on name, age, or any other data - ALWAYS ask the user
+             * CRITICAL: When user provides gender selection (1 or 2), use save_gender_details tool with "Male" for 1 and "Female" for 2
+             * CRITICAL: ONLY after gender is saved, continue with steps 7-10
+           - WORKFLOW B: If get_prefill_data returns status 500 with error "phoneToPrefill_failed":
+             * Respond: "To continue with your loan application, please upload your Aadhaar card. You can upload it by clicking the file upload button below."
+             * This is the ONLY case where Aadhaar upload should be requested
+           - CRITICAL: If get_prefill_data returns ANY OTHER status (including other 500 errors), follow WORKFLOW A (Normal Flow)
+           - CRITICAL: Do NOT ask for Aadhaar upload for any other reason or error condition
+           - If user responds with "Successfully processed Aadhaar document and saved details.":
+             * Respond: "Great! Your Aadhaar card has been processed successfully. Now, please provide your PAN card details. You can either:\n\n**Upload your PAN card** by clicking the file upload button below\n\n**Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
+           - If user provides a PAN card number (10 character alphanumeric string):
+             * Use handle_pan_card_number tool to save the PAN card number
+             * After successful save, ask for email address
+           - If user provides an email address:
+             * Use handle_email_address tool to save the email address
+             * If the tool returns status 'success' with 'continue_chain': True:
+               * IMMEDIATELY continue with the remaining steps in sequence:
+                 - Use pan_verification tool with session_id
+                 - Use get_employment_verification tool with session_id  
+                 - Use save_employment_details tool with session_id
+                 - Use get_bureau_decision tool with session_id
+               * Do NOT wait for user input - execute these steps automatically in the chain
+               * Return the final formatted response from get_bureau_decision
+             * If the tool returns any other status, handle the error appropriately
            - IMMEDIATELY proceed to step 6 after completion
 
         7. Address Processing:
            - didn't miss this step
            - After processing the prefill data, use the process_address_data tool by session_id  
            - Use pan_verification tool using session_id 
-           - CRITICAL: If pan_verification returns status 500 or error, STOP the process and inform the user about the PAN verification failure
-           - Only continue to step 8 if pan_verification returns status 200
+           - CRITICAL: If pan_verification returns status 500 or error:
+             * Ask user: "Please provide your PAN card details. You can either:\n\n1. **Upload your PAN card** by clicking the file upload button below\n2. **Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
+             * When user provides PAN card number (10 character alphanumeric string):
+               * Use handle_pan_card_number tool to save the PAN card number
+           - If pan_verification returns status 200, continue to step 8
            - IMMEDIATELY proceed to step 8 after completion
 
         8. Employment Verification:
            - didn't miss this step
            - Use get_employment_verification tool to check employment status using session_id
-           - IMMEDIATELY proceed to step 8 after completion
+           - CRITICAL: Continue to step 9 regardless of the result (even if it returns status 500 or fails)
+           - Do NOT stop the process or ask for Aadhaar upload based on employment verification result
+           - IMMEDIATELY proceed to step 9 after completion
 
         9. Save Employment Details:
            - didn't miss this step
@@ -154,14 +237,163 @@ class CarepayAgent:
 
         CRITICAL: NEVER deviate from these exact steps and templates. Do not add, modify, or skip any steps.
 
+        CRITICAL CORRECTION HANDLING:
+        - When a user says they want to change treatment reason, treatment cost, or date of birth, ask them to provide the new value
+        - When they provide the new value, IMMEDIATELY call the appropriate correction tool
+        - Do NOT ask for confirmation or additional information - just call the tool with the provided value
+        - Examples:
+          * User: "I want to change treatment reason" → Ask: "Please provide the new treatment reason"
+          * User: "hair transplant" → IMMEDIATELY call correct_treatment_reason tool with "hair transplant"
+          * User: "I want to change treatment cost" → Ask: "Please provide the new treatment cost"
+          * User: "5000" → IMMEDIATELY call correct_treatment_cost tool with "5000"
+          * User: "90000" → IMMEDIATELY call correct_treatment_cost tool with "90000"
+
+        CRITICAL DETAIL UPDATE HANDLING:
+        - When a user provides gender selection (Male, Female, 1, 2), IMMEDIATELY call save_gender_details tool
+        - When a user provides marital status selection (Married, Unmarried/Single, Yes, No, 1, 2), IMMEDIATELY call save_marital_status_details tool
+        - When a user provides education level selection (P.H.D, Graduation, Post graduation, etc.), IMMEDIATELY call save_education_level_details tool
+        - Do NOT generate success messages without calling the tools - ALWAYS call the appropriate tool first
+        - The tools will automatically format the data to the correct API format
+        - Examples:
+          * User: "Male" → IMMEDIATELY call save_gender_details tool with "Male"
+          * User: "Unmarried/Single" → IMMEDIATELY call save_marital_status_details tool with "Unmarried/Single" (will be formatted to "No")
+          * User: "P.H.D" → IMMEDIATELY call save_education_level_details tool with "P.H.D" (will be formatted to "P.H.D.")
+
+        CRITICAL EDUCATION LEVEL MAPPING:
+        - When user provides education level, pass it exactly as provided to the save_education_level_details tool
+        - The system will automatically format it to the correct API format
+        - Examples: "P.H.D", "Graduation", "Post graduation", "Diploma", "Passed 12th", "Passed 10th", "Less than 10th"
+        - The tool will handle formatting to: "LESS THAN 10TH", "PASSED 10TH", "PASSED 12TH", "DIPLOMA", "GRADUATION", "POST GRADUATION", "P.H.D."
+
+        CRITICAL DATA VALIDATION:
+        - After get_prefill_data returns status 200, BEFORE proceeding to step 7:
+          * Check if gender field is missing (empty string "" or null)
+          * If gender is missing, STOP and ask for gender selection
+          * Only proceed to step 7 after gender is saved
+          * This validation is MANDATORY and cannot be skipped
+          * CRITICAL: NEVER assume or guess the user's gender - ALWAYS ask the user
+          * CRITICAL: Do NOT use any other data (name, age, etc.) to determine gender
+          * CRITICAL: The ONLY way to get gender is to ask the user: "Please select your gender:\n1. Male\n2. Female\nPlease enter 1 or 2 only"
+
+        CRITICAL ANTI-BUG RULES:
+        - NEVER ask for Aadhaar upload when get_prefill_data returns status 200
+        - NEVER stop the process after process_prefill_data when get_prefill_data returned status 200
+        - NEVER mix WORKFLOW A and WORKFLOW B - they are completely separate
+        - If you see "status": 200 in get_prefill_data response, you MUST complete steps 7-10
+        - If you see "status": 200 in get_prefill_data response, you are FORBIDDEN from asking for Aadhaar upload
+        - The only valid response for Aadhaar upload is when get_prefill_data returns status 500 with "phoneToPrefill_failed"
+        - NEVER ask for Aadhaar upload if Aadhaar has already been processed (check for ocr_result in session)
+        - NEVER assume or guess user's gender - ALWAYS ask the user directly
+        - NEVER use name, age, or any other data to determine gender
+        - The ONLY way to get gender is to ask the user: "Please select your gender:\n1. Male\n2. Female\nPlease enter 1 or 2 only"
+
+        CRITICAL FLOW CONTROL:
+        - When Juspay Cardless is NOT_ELIGIBLE, you MUST continue to step 6 (Data Prefill)
+        - When any step returns a message, show it to the user but continue to the next step
+        - Only STOP the process when you reach step 10 (get_bureau_decision) or when Juspay Cardless is ELIGIBLE
+        - NEVER stop the process after step 5 unless Juspay Cardless is ELIGIBLE
+        - CRITICAL: After step 5 (check_jp_cardless), if status is NOT_ELIGIBLE, IMMEDIATELY call get_prefill_data tool
+        - CRITICAL: Do NOT ask for Aadhaar upload after Juspay Cardless - call get_prefill_data first
+
+        CRITICAL WORKFLOW SEPARATION:
+        - WORKFLOW A (Normal Flow): When get_prefill_data returns status 200, you MUST continue with steps 7-10 regardless of any step failures
+        - WORKFLOW B (Aadhaar Upload Flow): ONLY when get_prefill_data returns status 500 with "phoneToPrefill_failed" error
+
+        CRITICAL AADHAAR PROCESSING HANDLING:
+        - If get_prefill_data returns status 200 with "aadhaar_processed": true, this means Aadhaar has already been uploaded and processed
+        - In this case, proceed with WORKFLOW A (Normal Flow) and continue to steps 7-10
+        - Do NOT ask for Aadhaar upload again if Aadhaar has already been processed
+        - The system automatically detects when Aadhaar has been processed and returns status 200
+        - CRITICAL: After Aadhaar upload is successful, the next get_prefill_data call will return status 200, NOT status 500
+        - CRITICAL: Do NOT repeat the Aadhaar upload request after Aadhaar has been successfully processed
+        - CRITICAL: NEVER mix these workflows - if get_prefill_data returns status 200, you are in WORKFLOW A and must complete steps 7-10
+        - CRITICAL: Even if get_employment_verification fails (status 500), continue with save_employment_details and get_bureau_decision in WORKFLOW A
+        - CRITICAL: Do NOT ask for Aadhaar upload in WORKFLOW A - that is only for WORKFLOW B
+        - CRITICAL: Aadhaar upload request should ONLY appear when get_prefill_data returns status 500 with "phoneToPrefill_failed"
+        - CRITICAL: Any other status from get_prefill_data (including other 500 errors) should follow WORKFLOW A
+
+        CRITICAL WORKFLOW ENFORCEMENT:
+        - If get_prefill_data returns status 200, you are FORBIDDEN from asking for Aadhaar upload
+        - If get_prefill_data returns status 200, you MUST call ALL remaining tools in sequence: process_prefill_data, process_address_data, pan_verification, get_employment_verification, save_employment_details, get_bureau_decision
+        - If get_prefill_data returns status 200, you MUST NOT stop until you reach get_bureau_decision
+        - The phrase "upload your Aadhaar card" should NEVER appear in your response when get_prefill_data returns status 200
+        - WORKFLOW A is a COMPLETE flow - you cannot exit it early or switch to WORKFLOW B
+
+        CRITICAL STEP TRACKING:
+        - If user responds with "Successfully processed Aadhaar document and saved details.":
+          * Skip steps 1-5 (they are already completed)
+          * Start directly from step 6 (Data Prefill)
+          * Respond: "Great! Your Aadhaar card has been processed successfully. Now, please provide your PAN card details. You can either:\n\n **Upload your PAN card** by clicking the file upload button below\n\n**Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
+        - If user provides a PAN card number (10 character alphanumeric string):
+          * Use handle_pan_card_number tool to save the PAN card number
+          * After successful save, ask for email address: "Please provide your email address to continue."
+        - If user provides an email address:
+          * Use handle_email_address tool to save the email address
+          * If the tool returns status 'success' with 'continue_chain': True:
+            * IMMEDIATELY continue with the remaining steps in sequence:
+              - Use pan_verification tool with session_id
+              - Use get_employment_verification tool with session_id  
+              - Use save_employment_details tool with session_id
+              - Use get_bureau_decision tool with session_id
+            * Do NOT wait for user input - execute these steps automatically in the chain
+            * Return the final formatted response from get_bureau_decision
+          * If the tool returns any other status, handle the error appropriately
+          * IMPORTANT: You MUST call get_bureau_decision tool to get the final loan decision - do not generate your own response
+        - If gender is missing from prefill data:
+          * Ask user: "Please select your gender:\n1. Male\n2. Female\nPlease enter 1 or 2 only"
+          * When user provides gender selection (1 or 2):
+            * Use save_gender_details tool with "Male" for 1 and "Female" for 2
+            * After successful save, continue with normal flow
+
+        CRITICAL PAN VERIFICATION HANDLING:
+        - When pan_verification tool returns status 500 or error:
+          * Ask user: "Please provide your PAN card details. You can either:\n\n1. **Upload your PAN card** by clicking the file upload button below\n2. **Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
+          * When user provides PAN card number (10 character alphanumeric string):
+            * Use handle_pan_card_number tool to save the PAN card number
+            * After successful save, ask for email address: "Please provide your email address to continue."
+          * When user provides email address:
+            * Use handle_email_address tool to save the email address
+            * If email tool returns status 'success' with 'continue_chain': True:
+              * IMMEDIATELY continue with remaining steps in sequence:
+                - Use pan_verification tool with session_id (to verify the saved PAN)
+                - Use get_employment_verification tool with session_id  
+                - Use save_employment_details tool with session_id
+                - Use get_bureau_decision tool with session_id
+              * Return the final formatted response from get_bureau_decision
+            * If email tool returns any other status, handle the error appropriately
+        - When pan_verification tool returns status 200, continue with normal flow
+
+        CRITICAL MISSING DATA HANDLING:
+        - When get_prefill_data returns status 200 but gender is missing (empty string or null):
+          * STOP the process immediately
+          * Ask user: "Please select your gender:\n1. Male\n2. Female\nPlease enter 1 or 2 only"
+          * CRITICAL: NEVER assume gender based on name, age, or any other data
+          * CRITICAL: The ONLY way to get gender is to ask the user directly
+          * When user provides gender selection (1 or 2):
+            * Use save_gender_details tool with "Male" for 1 and "Female" for 2
+            * After successful save, continue with normal flow (steps 7-10)
+        - When get_prefill_data returns status 200 but marital status is missing:
+          * Ask user: "Please select your marital status:\n1. Yes (Married)\n2. No (Single)\nPlease enter 1 or 2 only"
+          * When user provides marital status selection (1 or 2):
+            * Use save_marital_status_details tool with "Yes" for 1 and "No" for 2
+            * After successful save, continue with normal flow (steps 7-10)
+        - When get_prefill_data returns status 200 but education level is missing:
+          * Ask user: "Please select your education level:\n1. LESS THAN 10TH\n2. PASSED 10TH\n3. PASSED 12TH\n4. DIPLOMA\n5. GRADUATION\n6. POST GRADUATION\n7. P.H.D.\nPlease enter 1-7 only"
+          * When user provides education level selection (1-7):
+            * Map selection to education level and use save_education_level_details tool
+            * After successful save, continue with normal flow (steps 7-10)
+
         CRITICAL BUREAU DECISION HANDLING:
-        - When get_bureau_decision tool returns a formatted response, use it EXACTLY as provided
-        - Do NOT add any additional formatting or text to the bureau decision response
+        - You MUST call the get_bureau_decision tool when you need to get the loan decision
+        - DO NOT generate your own response for loan decisions - ALWAYS use the get_bureau_decision tool
+        - When get_bureau_decision tool returns a formatted response, use it EXACTLY as provided to user and don't modify it
         - Do NOT duplicate the employment type question or any other part of the response
         - Return the complete formatted response from the tool without any modifications
         - If the tool response includes "What is the Employment Type of the patient?", keep it exactly as shown
+        - NEVER respond with just "1. SALARIED" or "2. SELF_EMPLOYED" - always return the FULL formatted message
+        - DO NOT try to be smart and simplify the response - return it EXACTLY as provided by the tool
+
         """
-        
     
     def create_session(self, doctor_id=None, doctor_name=None, phone_number=None) -> str:
         """
@@ -222,35 +454,49 @@ class CarepayAgent:
     def run(self, session_id: str, message: str) -> str:
         """
         Process a user message within a session
-        
+
         Args:
             session_id: Session identifier
             message: User message
-            
+
         Returns:
             Agent response
         """
         try:
             # Get session from database once
             session = SessionManager.get_session_from_db(session_id)
-            
             current_status = session.get("status", "active")
-          
-            # Special handling for collecting additional details state
+            logger.info(f"Session {session_id} current status: {current_status}")
+
+            # Helper: detect employment type prompt in a string
+            def is_employment_type_prompt(text: str) -> bool:
+                return (
+                    "What is the Employment Type of the patient?" in text
+                    and "1. SALARIED" in text
+                    and "2. SELF_EMPLOYED" in text
+                    and "Please Enter input 1 or 2 only" in text
+                )
+
+            # If already collecting additional details, use the sequential handler,
+            # but allow status to be changed if agent message contains employment type question
             if current_status == "collecting_additional_details":
                 logger.info(f"Session {session_id}: Entering additional details collection mode")
-                # Use direct sequential flow instead of full agent for efficiency
                 ai_message = self._handle_additional_details_collection(session_id, message)
-                
-                # Update history efficiently
+                # If the AI message contains the employment type prompt, update status accordingly
+                if is_employment_type_prompt(ai_message):
+                    logger.info(f"Employment type prompt detected in collecting_additional_details mode, updating session status for {session_id}")
+                    SessionManager.update_session_data_field(session_id, "status", "collecting_additional_details")
+                    SessionManager.update_session_data_field(session_id, "data.collection_step", "employment_type")
+                    updated_session = SessionManager.get_session_from_db(session_id)
+                    if not updated_session.get("data", {}).get("additional_details"):
+                        SessionManager.update_session_data_field(session_id, "data.additional_details", {})
+                    logger.info(f"Session {session_id} marked as collecting_additional_details (from collecting_additional_details branch)")
                 self._update_session_history(session_id, message, ai_message)
                 return ai_message
-            
+
             logger.info(f"Session {session_id}: Using full agent executor (status: {current_status})")
-            # Create session-specific agent executor with session-aware tools
             session_tools = self._create_session_aware_tools(session_id)
-            
-            # Create the prompt
+
             prompt = ChatPromptTemplate.from_messages([
                 ("system", self.system_prompt),
                 ("human", "{input}"),
@@ -258,7 +504,6 @@ class CarepayAgent:
                 MessagesPlaceholder(variable_name="agent_scratchpad"),
             ])
 
-            # Create session-specific agent
             agent = create_openai_functions_agent(self.llm, session_tools, prompt)
             session_agent_executor = AgentExecutor(
                 agent=agent,
@@ -266,51 +511,175 @@ class CarepayAgent:
                 verbose=True,
                 max_iterations=50,
                 handle_parsing_errors=True,
+                return_intermediate_steps=True,  # Ensure we get intermediate steps
             )
-            
-            # Get chat history for LangChain (convert from serializable format)
+
             chat_history = self._convert_to_langchain_messages(session.get("history", []))
             chat_history.append(HumanMessage(content=message))
+
+            # Check if the message might trigger employment type questions
+            message_triggers_employment_check = any(keyword in message.lower() for keyword in [
+                "continue", "next", "proceed", "what", "employment", "type", "salaried", "self-employed"
+            ])
             
-            # Use session-specific agent executor
             response = session_agent_executor.invoke({
-                "input": message, 
+                "input": message,
                 "chat_history": chat_history
             })
+
+            logger.info(f"Agent executor response keys: {list(response.keys())}")
+            logger.info(f"Agent executor output: {response.get('output', 'No output')}")
             
-            # Extract AI message from response
-            ai_message = response.get("output", "I'm processing your request. Please wait.")
+            # Check if get_bureau_decision was called by looking at intermediate steps
+            bureau_decision_response = None
+            if "intermediate_steps" in response:
+                for step in response.get("intermediate_steps", []):
+                    if len(step) >= 2 and hasattr(step[0], 'tool') and step[0].tool == "get_bureau_decision":
+                        tool_output = step[1]
+                        logger.info(f"Found get_bureau_decision in intermediate steps with output: {tool_output}")
+                        if "What is the Employment Type of the patient?" in str(tool_output):
+                            bureau_decision_response = str(tool_output)
+                            logger.info(f"Using bureau decision tool output as final response")
+                            break
             
-            # Validate that all required steps were executed
-            self._validate_and_handle_early_chain_finish(session_id, response, ai_message)
-            
-            # Check if this is the loan application decision with approval or income verification required
-            # Add status update for additional details collection when employment type is being asked
-            # Check for the specific employment type prompt and update status accordingly
-            employment_type_prompt = (
-                "What is the Employment Type of the patient?" in ai_message
-                and "1. SALARIED" in ai_message
-                and "2. SELF_EMPLOYED" in ai_message
-                and "Please Enter input 1 or 2 only" in ai_message
+            # If bureau decision was called and has employment type prompt, use its response
+            if bureau_decision_response:
+                ai_message = bureau_decision_response
+            else:
+                ai_message = response.get("output", "I'm processing your request. Please wait.")
+                
+            # Additional check: if the response is just "1. SALARIED" or similar, it's wrong
+            if ai_message.strip() in ["1. SALARIED", "2. SELF_EMPLOYED", "1", "2", "SALARIED", "SELF_EMPLOYED"]:
+                logger.error(f"Agent returned incorrect simplified response: {ai_message}")
+                # Try to get the bureau decision directly
+                try:
+                    bureau_result = self.get_bureau_decision(session_id)
+                    if bureau_result and "What is the Employment Type of the patient?" in bureau_result:
+                        ai_message = bureau_result
+                        logger.info(f"Forced bureau decision call to get correct response: {ai_message}")
+                except Exception as e:
+                    logger.error(f"Error forcing bureau decision: {e}")
+
+            # Check if the response came from get_bureau_decision tool and use it directly
+            bureau_decision_tool_used = False
+            bureau_decision_tool_output = None
+            if "intermediate_steps" in response:
+                logger.info(f"Checking intermediate steps for bureau decision tool: {len(response['intermediate_steps'])} steps")
+                for i, step in enumerate(response["intermediate_steps"]):
+                    logger.info(f"Step {i}: tool={step[0].tool if len(step) > 0 else 'None'}")
+                    if len(step) >= 2 and step[0].tool == "get_bureau_decision":
+                        tool_output = step[1]
+                        logger.info(f"Found get_bureau_decision tool, output: {tool_output}")
+                        if is_employment_type_prompt(str(tool_output)):
+                            bureau_decision_tool_output = str(tool_output)
+                            # Remove duplicate lines
+                            lines = bureau_decision_tool_output.split('\n')
+                            unique_lines = []
+                            seen_lines = set()
+                            for line in lines:
+                                line = line.strip()
+                                if line and line not in seen_lines:
+                                    unique_lines.append(line)
+                                    seen_lines.add(line)
+                            bureau_decision_tool_output = '\n'.join(unique_lines)
+                            bureau_decision_tool_used = True
+                            logger.info(f"Found get_bureau_decision tool output with employment type prompt: {bureau_decision_tool_output}")
+                            break
+            else:
+                logger.info("No intermediate_steps found in response - agent executor may not have called any tools")
+
+            # If bureau decision tool was used and prompt is present, update status and return
+            if bureau_decision_tool_used and bureau_decision_tool_output:
+                if is_employment_type_prompt(bureau_decision_tool_output):
+                    logger.info(f"Employment type prompt detected, updating session status for {session_id}")
+                    SessionManager.update_session_data_field(session_id, "status", "collecting_additional_details")
+                    SessionManager.update_session_data_field(session_id, "data.collection_step", "employment_type")
+                    updated_session = SessionManager.get_session_from_db(session_id)
+                    if not updated_session.get("data", {}).get("additional_details"):
+                        SessionManager.update_session_data_field(session_id, "data.additional_details", {})
+                    logger.info(f"Session {session_id} marked as collecting_additional_details (from bureau_decision_tool branch)")
+                    
+                    # Force verify the status was updated
+                    final_session = SessionManager.get_session_from_db(session_id)
+                    if final_session:
+                        logger.info(f"Final session status after update: {final_session.get('status')}")
+                        if final_session.get('status') != "collecting_additional_details":
+                            logger.error(f"Status update failed! Current status: {final_session.get('status')}")
+                            # Force update again
+                            SessionManager.update_session_data_field(session_id, "status", "collecting_additional_details")
+                            logger.info("Forced status update again")
+                
+                self._update_session_history(session_id, message, bureau_decision_tool_output)
+                return bureau_decision_tool_output
+
+            # Check if the agent executor output contains employment type prompt (even if tool wasn't called directly)
+            employment_type_prompt_in_output = is_employment_type_prompt(ai_message)
+
+            # Check if agent should have called bureau decision tool but didn't
+            should_have_called_bureau_tool = (
+                employment_type_prompt_in_output
+                and not bureau_decision_tool_used
+                and "intermediate_steps" in response
+                and len(response["intermediate_steps"]) > 0
             )
-            if employment_type_prompt:
+
+            # ALWAYS force the bureau decision tool call if employment type prompt is detected
+            if employment_type_prompt_in_output and not bureau_decision_tool_used:
+                logger.warning(f"Employment type prompt detected but get_bureau_decision tool not used. Forcing tool call.")
+                try:
+                    bureau_result = self.get_bureau_decision(session_id)
+                    if bureau_result and is_employment_type_prompt(bureau_result):
+                        ai_message = bureau_result
+                        logger.info(f"Forced bureau decision tool call successful: {ai_message}")
+                        # Update the response to indicate tool was used
+                        bureau_decision_tool_used = True
+                        bureau_decision_tool_output = bureau_result
+                    else:
+                        logger.error(f"Forced bureau decision tool call returned invalid result: {bureau_result}")
+                except Exception as e:
+                    logger.error(f"Error forcing bureau decision tool call: {e}")
+
+            # If employment type prompt is present in output, update status and collection step
+            if employment_type_prompt_in_output:
+                logger.info(f"Employment type prompt detected in agent output, updating session status for {session_id}")
                 SessionManager.update_session_data_field(session_id, "status", "collecting_additional_details")
                 SessionManager.update_session_data_field(session_id, "data.collection_step", "employment_type")
-                
-                # Initialize additional_details if it doesn't exist
-                if session.get("data", {}).get("additional_details") is None:
+                updated_session = SessionManager.get_session_from_db(session_id)
+                if not updated_session.get("data", {}).get("additional_details"):
                     SessionManager.update_session_data_field(session_id, "data.additional_details", {})
+                logger.info(f"Session {session_id} marked as collecting_additional_details (from agent output branch)")
                 
-                logger.info(f"Session {session_id} marked as collecting_additional_details")
+                # Force verify the status was updated
+                final_session = SessionManager.get_session_from_db(session_id)
+                if final_session:
+                    logger.info(f"Final session status after update: {final_session.get('status')}")
+                    if final_session.get('status') != "collecting_additional_details":
+                        logger.error(f"Status update failed! Current status: {final_session.get('status')}")
+                        # Force update again
+                        SessionManager.update_session_data_field(session_id, "status", "collecting_additional_details")
+                        logger.info("Forced status update again")
                 
-                # Update history efficiently
                 self._update_session_history(session_id, message, ai_message)
+                logger.info(f"Final response to user: {ai_message}")
                 return ai_message
+
+            # Final check: if the response contains employment type prompt, ensure status is updated
+            if is_employment_type_prompt(ai_message) and current_status != "collecting_additional_details":
+                logger.warning(f"Employment type prompt in final response but status not updated. Forcing update.")
+                SessionManager.update_session_data_field(session_id, "status", "collecting_additional_details")
+                SessionManager.update_session_data_field(session_id, "data.collection_step", "employment_type")
+                if not session.get("data", {}).get("additional_details"):
+                    SessionManager.update_session_data_field(session_id, "data.additional_details", {})
+                logger.info(f"Forced status update to collecting_additional_details")
             
-            # Update conversation history efficiently (only if we haven't already updated it for bureau decision)
-            if current_status != "collecting_additional_details" or "what is the employment type of the patient?" not in ai_message.lower():
-                self._update_session_history(session_id, message, ai_message)
+            # Check if user is trying to make corrections before application completion
+            correction_keywords = ["change", "correct", "update", "modify", "edit", "wrong", "mistake"]
+            is_correction_request = any(keyword in message.lower() for keyword in correction_keywords)
             
+            
+            # Otherwise, just update the conversation history and return
+            self._update_session_history(session_id, message, ai_message)
+            logger.info(f"Final response to user: {ai_message}")
             return ai_message
         
         except Exception as e:
@@ -623,11 +992,36 @@ class CarepayAgent:
             
             if not user_id:
                 return "User ID is required to get prefill data"
+            
+            # Check if Aadhaar has already been processed and stored
+            ocr_result = session.get("data", {}).get("ocr_result")
+            if ocr_result and ocr_result.get("name") and ocr_result.get("aadhaar_number"):
+                logger.info(f"Aadhaar already processed for user_id: {user_id}, proceeding with prefill data")
+                # Aadhaar has been processed, so we should proceed with the normal flow
+                # Return a mock 200 response to indicate success
+                return json.dumps({
+                    "status": 200,
+                    "data": {
+                        "message": "Aadhaar data already processed, proceeding with application",
+                        "aadhaar_processed": True
+                    }
+                })
                 
             result = self.api_client.get_prefill_data(user_id)
             # Store the complete API response in session data
             if session_id:
                 SessionManager.update_session_data_field(session_id, "data.api_responses.get_prefill_data", result)
+            
+            # Check if the API call failed with 500 error
+            if result.get("status") == 500:
+                logger.warning(f"phoneToPrefill API failed with 500 error for user_id: {user_id}")
+                # Return a specific message asking for Aadhaar upload
+                return json.dumps({
+                    "status": 500,
+                    "error": "phoneToPrefill_failed",
+                    "message": "Please upload your Aadhaar card to continue with the loan application process.",
+                    "requires_aadhaar_upload": True
+                })
             
             return json.dumps(result)
         except Exception as e:
@@ -816,7 +1210,6 @@ class CarepayAgent:
                     if response_body:
                         try:
                             # responseBody is a JSON string, so parse it
-                            import json
                             response_json = json.loads(response_body)
                             # Traverse to result > result > summary > recentEmployerData > establishmentName
                             result_outer = response_json.get("result", {})
@@ -1417,15 +1810,30 @@ class CarepayAgent:
                             try:
                                 pincode_data = self.api_client.state_and_city_by_pincode(address_data["pincode"])
                                 logger.info(f"Pincode API response for pincode {address_data['pincode']}: {pincode_data}")
+                                city_set = False
                                 if pincode_data and pincode_data.get("status") == "success":
                                     # Only update if we get valid non-null data
                                     if pincode_data.get("city") and pincode_data["city"] is not None:
                                         address_data["city"] = pincode_data["city"]
+                                        city_set = True
                                     if pincode_data.get("state") and pincode_data["state"] is not None:
                                         address_data["state"] = pincode_data["state"]
+                                # If city is not set from API, use last word of address as city
+                                if not city_set:
+                                    address_str = address_data.get("address", "")
+                                    if address_str:
+                                        # Split address by whitespace and take last word
+                                        address_words = address_str.strip().split()
+                                        if address_words:
+                                            address_data["city"] = address_words[-1]
                             except Exception as e:
                                 logger.warning(f"Failed to get city/state from pincode API: {e}")
-                                # Continue with original data if API call fails
+                                # If API call fails, try to set city from address as fallback
+                                address_str = address_data.get("address", "")
+                                if address_str:
+                                    address_words = address_str.strip().split()
+                                    if address_words:
+                                        address_data["city"] = address_words[-1]
 
                     logger.info(f"Extracted address data: {address_data}")
 
@@ -1435,6 +1843,8 @@ class CarepayAgent:
 
                     # Save the address details
                     result = self.api_client.save_address_details(user_id, address_data)
+                    permanent_result = self.api_client.save_permanent_address_details(user_id, address_data)
+                    logger.info(f"Permanent address details saved: {permanent_result}")
 
                     # Store the API response
                     if session_id:
@@ -1630,10 +2040,11 @@ class CarepayAgent:
             
             # Handle employment type input (first step)
             if collection_step == "employment_type":
-                if "1" in message:
+                # Check for both number and word inputs
+                if "1" in message or "salaried" in message.lower():
                     additional_details["employment_type"] = "SALARIED"
                     selected_option = "SALARIED"
-                elif "2" in message:
+                elif "2" in message or "self" in message.lower() and "employed" in message.lower():
                     additional_details["employment_type"] = "SELF_EMPLOYED"
                     selected_option = "SELF_EMPLOYED"
                 else:
@@ -1653,10 +2064,11 @@ please Enter input 1 or 2 only"""
             
             # Handle marital status input
             elif collection_step == "marital_status":
-                if "1" in message:
+                # Check for both number and word inputs
+                if "1" in message or "married" in message.lower():
                     additional_details["marital_status"] = "1"
                     selected_option = "Married"
-                elif "2" in message:
+                elif "2" in message or "unmarried" in message.lower() or "single" in message.lower():
                     additional_details["marital_status"] = "2"
                     selected_option = "Unmarried/Single"
                 else:
@@ -1691,9 +2103,32 @@ Please Enter input between 1 to 7 only"""
                     "7": "P.H.D"
                 }
                 
+                # Check for both number and word inputs
+                selected_key = None
+                message_lower = message.lower().strip()
+                
+                # First check if it's a number
                 if message.strip() in education_options:
-                    additional_details["education_qualification"] = message.strip()
-                    selected_option = education_options[message.strip()]
+                    selected_key = message.strip()
+                # Then check for word matches
+                elif "less" in message_lower and "10th" in message_lower:
+                    selected_key = "1"
+                elif "passed 10th" in message_lower or "10th" in message_lower:
+                    selected_key = "2"
+                elif "passed 12th" in message_lower or "12th" in message_lower:
+                    selected_key = "3"
+                elif "diploma" in message_lower:
+                    selected_key = "4"
+                elif "graduation" in message_lower and "post" not in message_lower:
+                    selected_key = "5"
+                elif "post graduation" in message_lower or "postgraduation" in message_lower:
+                    selected_key = "6"
+                elif "phd" in message_lower or "p.h.d" in message_lower:
+                    selected_key = "7"
+                
+                if selected_key:
+                    additional_details["education_qualification"] = selected_key
+                    selected_option = education_options[selected_key]
                 else:
                     return "Please select a valid option for Education Qualification (1-7)"
                 
@@ -1930,8 +2365,9 @@ Please enter 6 digits:"""
 Thank you! Your application is now complete. Your Loan application decision: {decision_status}."""
                 else:
                     return f"""Workplace pincode noted: {pincode}
-
-Thank you! Your application is now complete. Loan application decision: {decision_status}. Please check your application status by visiting the following:
+             
+Thank you! Your application is now complete. Loan application decision: {decision_status}. 
+Please check your application status by visiting the following:
 {link_to_display}"""
             
             # If collection is complete, give a final message
@@ -2168,7 +2604,8 @@ Thank you! Your application is now complete. Loan application decision: {decisio
         Returns:
             List of tools with session_id bound
         """
-        return [
+        logger.info(f"Creating session-aware tools for session_id: {session_id}")
+        tools = [
             StructuredTool.from_function(
                 func=lambda fullName, phoneNumber, treatmentCost, monthlyIncome: self.store_user_data_structured(fullName, phoneNumber, treatmentCost, monthlyIncome, session_id),
                 name="store_user_data",
@@ -2231,7 +2668,7 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             Tool(
                 name="get_bureau_decision",
                 func=lambda session_id: self.get_bureau_decision(session_id),
-                description="Get bureau decision for loan application using session_id",
+                description="Get bureau decision for loan application using session_id. CRITICAL: The response from this tool is the FINAL formatted message that MUST be returned to the user EXACTLY as provided without any modifications.   ",
             ),
             Tool(
                 name="get_session_data",
@@ -2244,7 +2681,49 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                 func=lambda session_id: self._get_profile_link(session_id),
                 description="Get profile link for a user using session_id",
             ),
+            Tool(
+                name="handle_pan_card_number",
+                func=lambda pan_number: self.handle_pan_card_number(pan_number, session_id),
+                description="Handle PAN card number input and save it to the system. Use this when user provides their PAN card number.",
+            ),
+            Tool(
+                name="handle_email_address",
+                func=lambda email_address: self.handle_email_address(email_address, session_id),
+                description="Handle email address input and save it to the system. Use this when user provides their email address.",
+            ),
+            Tool(
+                name="save_gender_details",
+                func=lambda gender: self.save_gender_details(gender, session_id),
+                description="Save user's gender details. Use this when user provides their gender information like 'Male', 'Female', '1', or '2'. Call this tool immediately when user provides gender selection.",
+            ),
+            Tool(
+                name="save_marital_status_details",
+                func=lambda marital_status: self.save_marital_status_details(marital_status, session_id),
+                description="Save user's marital status details. Use this when user provides their marital status information like 'Married', 'Unmarried/Single', 'Yes', 'No', '1', or '2'. The system will automatically format it to the correct API format (Yes/No). Call this tool immediately when user provides marital status selection.",
+            ),
+            Tool(
+                name="save_education_level_details",
+                func=lambda education_level: self.save_education_level_details(education_level, session_id),
+                description="Save user's education level details. Use this when user provides their education level information like 'P.H.D', 'Graduation', 'Post graduation', 'Diploma', 'Passed 12th', 'Passed 10th', 'Less than 10th', or numbers 1-7. The system will automatically format it to the correct API format (LESS THAN 10TH, PASSED 10TH, etc.). Call this tool immediately when user provides education level selection.",
+            ),
+            Tool(
+                name="correct_treatment_reason",
+                func=lambda new_treatment_reason: self.correct_treatment_name(new_treatment_reason, session_id),
+                description="Correct/update the treatment reason in the loan application. Use this when user provides a new treatment reason like 'hair transplant', 'dental surgery', etc. Call this tool immediately when user provides a treatment reason.",
+            ),
+            Tool(
+                name="correct_treatment_cost",
+                func=lambda new_treatment_cost: self.correct_treatment_cost(new_treatment_cost, session_id),
+                description="Correct/update the treatment cost in the loan application. Use this when user provides a new treatment cost like '5000', '10000', '90000', etc. (must be >= ₹3,000). Call this tool immediately when user provides a numeric treatment cost amount.",
+            ),
+            Tool(
+                name="correct_date_of_birth",
+                func=lambda new_date_of_birth: self.correct_date_of_birth(new_date_of_birth, session_id),
+                description="Correct/update the date of birth in the user profile. Use this when user wants to change their date of birth (format: YYYY-MM-DD).",
+            ),
         ]
+        logger.info(f"Created {len(tools)} tools for session {session_id}")
+        return tools
 
     def _determine_loan_decision(self, session_id: str, profile_link: str, fibe_link: str = None) -> Dict[str, str]:
         """
@@ -2294,7 +2773,18 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             # Extract bureau status
             if bureau_decision:
                 bureau_status = bureau_decision.get("status")
-                logger.info(f"Session {session_id}: Bureau status: {bureau_status}")
+                logger.info(f"Session {session_id}: Bureau status: {bureau_status} (type: {type(bureau_status)})")
+                logger.info(f"Session {session_id}: Full bureau decision: {bureau_decision}")
+                
+                # Debug: Check exact string matching
+                if bureau_status:
+                    logger.info(f"Session {session_id}: Bureau status checks:")
+                    logger.info(f"  - Exact match 'INCOME_VERIFICATION_REQUIRED': {bureau_status == 'INCOME_VERIFICATION_REQUIRED'}")
+                    logger.info(f"  - Upper case match: {bureau_status.upper() == 'INCOME_VERIFICATION_REQUIRED'}")
+                    logger.info(f"  - Contains 'income verification required': {'income verification required' in bureau_status.lower()}")
+                    logger.info(f"  - Raw status value: '{bureau_status}'")
+            else:
+                logger.warning(f"Session {session_id}: No bureau decision found in session data")
             
             # Apply decision flow logic
             decision_status = None
@@ -2309,23 +2799,35 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             # 2. If Fibe AMBER
             elif fibe_status == "AMBER":
                 # If bureau APPROVED -> APPROVED with profile link
-                if bureau_status and bureau_status.upper() == "APPROVED":
+                if bureau_status and (bureau_status.upper() == "APPROVED" or "approved" in bureau_status.lower()):
                     decision_status = "APPROVED"
                     link_to_use = profile_link
                     logger.info(f"Session {session_id}: Fibe AMBER + Bureau APPROVED -> APPROVED with profile link")
+                # If bureau INCOME_VERIFICATION_REQUIRED -> INCOME_VERIFICATION_REQUIRED with Fibe link
+                elif bureau_status and (bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED" or "income verification required" in bureau_status.lower()):
+                    decision_status = "INCOME_VERIFICATION_REQUIRED"
+                    link_to_use = fibe_link if fibe_link else profile_link
+                    logger.info(f"Session {session_id}: Fibe AMBER + Bureau INCOME_VERIFICATION_REQUIRED -> INCOME_VERIFICATION_REQUIRED with Fibe link")
+                    logger.info(f"Session {session_id}: Matched INCOME_VERIFICATION_REQUIRED condition")
+                # If bureau REJECTED -> REJECTED with profile link
+                elif bureau_status and (bureau_status.upper() == "REJECTED" or "rejected" in bureau_status.lower()):
+                    decision_status = "REJECTED"
+                    link_to_use = profile_link
+                    logger.info(f"Session {session_id}: Fibe AMBER + Bureau REJECTED -> REJECTED with profile link")
                 # Otherwise -> INCOME_VERIFICATION_REQUIRED with Fibe link
                 else:
                     decision_status = "INCOME_VERIFICATION_REQUIRED"
                     link_to_use = fibe_link if fibe_link else profile_link
                     logger.info(f"Session {session_id}: Fibe AMBER + Bureau not APPROVED -> INCOME_VERIFICATION_REQUIRED with Fibe link")
+                    logger.info(f"Session {session_id}: Fell through to else condition - bureau_status: '{bureau_status}'")
             
             # 3. If Fibe RED or profile ingestion 500 error -> Fall back to bureau decision with profile link
             elif fibe_status == "RED":
-                if bureau_status and bureau_status.upper() == "APPROVED":
+                if bureau_status and (bureau_status.upper() == "APPROVED" or "approved" in bureau_status.lower()):
                     decision_status = "APPROVED"
-                elif bureau_status and bureau_status.upper() == "REJECTED":
+                elif bureau_status and (bureau_status.upper() == "REJECTED" or "rejected" in bureau_status.lower()):
                     decision_status = "REJECTED"
-                elif bureau_status and bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED":
+                elif bureau_status and (bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED" or "income verification required" in bureau_status.lower()):
                     decision_status = "INCOME_VERIFICATION_REQUIRED"
                 else:
                     decision_status = "PENDING"
@@ -2334,11 +2836,11 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             
             # 4. If no Fibe status -> Use bureau decision with profile link
             elif fibe_status is None:
-                if bureau_status and bureau_status.upper() == "APPROVED":
+                if bureau_status and (bureau_status.upper() == "APPROVED" or "approved" in bureau_status.lower()):
                     decision_status = "APPROVED"
-                elif bureau_status and bureau_status.upper() == "REJECTED":
+                elif bureau_status and (bureau_status.upper() == "REJECTED" or "rejected" in bureau_status.lower()):
                     decision_status = "REJECTED"
-                elif bureau_status and bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED":
+                elif bureau_status and (bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED" or "income verification required" in bureau_status.lower()):
                     decision_status = "INCOME_VERIFICATION_REQUIRED"
                 else:
                     decision_status = "PENDING"
@@ -2350,8 +2852,10 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                 decision_status = "PENDING"
                 link_to_use = profile_link
                 logger.info(f"Session {session_id}: No decisions available -> PENDING with profile link")
+                logger.info(f"Session {session_id}: Fell through to final PENDING condition - fibe_status: '{fibe_status}', bureau_status: '{bureau_status}'")
             
             logger.info(f"Session {session_id}: Final decision - Status: {decision_status}, Link: {link_to_use}")
+            logger.info(f"Session {session_id}: Decision logic summary - Fibe: {fibe_status}, Bureau: {bureau_status}, Final: {decision_status}")
             
             return {
                 "status": decision_status,
@@ -2747,3 +3251,989 @@ Please Enter input 1 or 2 only"""
         except Exception as e:
             logger.error(f"Error formatting bureau decision response: {e}")
             return "There was an error processing the loan decision. Please try again."
+        
+
+    def handle_pan_card_number(self, pan_number: str, session_id: str) -> dict:
+        """
+        Handle PAN card number input and save it to the system, with PAN validation
+        
+        Args:
+            pan_number: PAN card number provided by user
+            session_id: Session identifier
+            
+        Returns:
+            Dictionary with status and message
+        """
+        try:
+            # Validate PAN card number format before processing
+            import re
+            pan_pattern = r'^[A-Z]{5}[0-9]{4}[A-Z]$'
+            if not pan_number or not re.match(pan_pattern, pan_number.strip().upper()):
+                return {
+                    'status': 'error',
+                    'message': "Please provide a valid PAN card number (e.g., ABCDE1234F)."
+                }
+
+            # Get session data
+            session_data = SessionManager.get_session_from_db(session_id)
+            if not session_data:
+                return {
+                    'status': 'error',
+                    'message': "Session not found. Please try again."
+                }
+            
+            # Extract user ID from session data
+            user_id = None
+            if isinstance(session_data.get('data'), str):
+                try:
+                    data = json.loads(session_data['data'])
+                    user_id = data.get('userId')
+                except json.JSONDecodeError:
+                    user_id = session_data.get('data')
+            else:
+                user_id = session_data.get('data', {}).get('userId')
+            
+            if not user_id:
+                return {
+                    'status': 'error',
+                    'message': "User ID not found in session. Please try again."
+                }
+            
+            # Get mobile number from session data
+            mobile_number = session_data.get('data', {}).get('mobileNumber') or session_data.get('data', {}).get('phoneNumber') or session_data.get('phone_number')
+            
+            # Prepare PAN card details
+            pan_details = {
+                "userId": user_id,
+                "panCard": pan_number,
+                "mobileNumber": mobile_number
+            }
+            
+            # Save PAN card details using API client
+            logger.info(f"Saving PAN card details for user {user_id}: {pan_details}")
+            try:
+                # Check if method exists
+                if hasattr(self.api_client, 'save_panCard_details'):
+                    logger.info("Method save_panCard_details found")
+                    save_result = self.api_client.save_panCard_details(user_id, pan_details)
+                    logger.info(f"PAN save result: {save_result}")
+                else:
+                    logger.warning("Method save_panCard_details not found, using save_basic_details")
+                    save_result = self.api_client.save_basic_details(user_id, pan_details)
+                    logger.info(f"Fallback save result: {save_result}")
+            except Exception as e:
+                logger.error(f"Error calling save method: {e}")
+                # Try fallback
+                try:
+                    save_result = self.api_client.save_basic_details(user_id, pan_details)
+                    logger.info(f"Fallback save result: {save_result}")
+                except Exception as fallback_error:
+                    logger.error(f"Fallback also failed: {fallback_error}")
+                    raise
+            
+            # Parse the save result
+            if isinstance(save_result, str):
+                try:
+                    save_result_data = json.loads(save_result)
+                except json.JSONDecodeError:
+                    save_result_data = {"status": 500, "message": "Invalid response from save_panCard_details"}
+            else:
+                save_result_data = save_result
+            
+            if save_result_data.get('status') != 200:
+                return {
+                    'status': 'error',
+                    'message': "Failed to save PAN card details. Please try again."
+                }
+            
+            # After successful PAN card save, ask for email address
+            return {
+                'status': 'success',
+                'message': "PAN card number saved successfully. Now, please provide your email address to continue with the loan application process.",
+                'data': {'panCard': pan_number},
+                'next_step': 'email_collection'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error handling PAN card number: {e}")
+            return {
+                'status': 'error',
+                'message': f"Error processing PAN card number: {str(e)}"
+            }
+
+    def handle_email_address(self, email_address: str, session_id: str) -> dict:
+        """
+        Handle email address input and save it to the system
+        
+        Args:
+            email_address: Email address provided by user
+            session_id: Session identifier
+            
+        Returns:
+            Dictionary with status and message
+        """
+        try:
+            # Basic email validation
+            import re
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if not re.match(email_pattern, email_address):
+                return {
+                    'status': 'error',
+                    'message': "Please provide a valid email address."
+                }
+            
+            # Get session data
+            session_data = SessionManager.get_session_from_db(session_id)
+            if not session_data:
+                return {
+                    'status': 'error',
+                    'message': "Session not found. Please try again."
+                }
+            
+            # Extract user ID from session data
+            user_id = None
+            if isinstance(session_data.get('data'), str):
+                try:
+                    data = json.loads(session_data['data'])
+                    user_id = data.get('userId')
+                except json.JSONDecodeError:
+                    user_id = session_data.get('data')
+            else:
+                user_id = session_data.get('data', {}).get('userId')
+            
+            if not user_id:
+                return {
+                    'status': 'error',
+                    'message': "User ID not found in session. Please try again."
+                }
+            
+            # Get mobile number from session data
+            mobile_number = session_data.get('data', {}).get('mobileNumber') or session_data.get('data', {}).get('phoneNumber') or session_data.get('phone_number')
+            
+            # Prepare email details
+            email_details = {
+                "userId": user_id,
+                "emailId": email_address,
+                "mobileNumber": mobile_number
+            }
+            
+            # Save email details using API client
+            logger.info(f"Saving email details for user {user_id}: {email_details}")
+            try:
+                # Check if method exists
+                if hasattr(self.api_client, 'save_emailaddress_details'):
+                    logger.info("Method save_emailaddress_details found")
+                    save_result = self.api_client.save_emailaddress_details(user_id, email_details)
+                    logger.info(f"Email save result: {save_result}")
+                else:
+                    logger.warning("Method save_emailaddress_details not found, using save_basic_details")
+                    save_result = self.api_client.save_basic_details(user_id, email_details)
+                    logger.info(f"Fallback save result: {save_result}")
+            except Exception as e:
+                logger.error(f"Error calling save method: {e}")
+                # Try fallback
+                try:
+                    save_result = self.api_client.save_basic_details(user_id, email_details)
+                    logger.info(f"Fallback save result: {save_result}")
+                except Exception as fallback_error:
+                    logger.error(f"Fallback also failed: {fallback_error}")
+                    raise
+            
+            # Parse the save result
+            if isinstance(save_result, str):
+                try:
+                    save_result_data = json.loads(save_result)
+                except json.JSONDecodeError:
+                    save_result_data = {"status": 500, "message": "Invalid response from save_emailaddress_details"}
+            else:
+                save_result_data = save_result
+            
+            if save_result_data.get('status') != 200:
+                return {
+                    'status': 'error',
+                    'message': "Failed to save email address. Please try again."
+                }
+            
+            return {
+                'status': 'success',
+                'message': "Email address saved successfully. Now continuing with the remaining verification steps automatically...",
+                'data': {'emailId': email_address},
+                'continue_chain': True,
+                'session_id': session_id,
+                'next_steps': ['pan_verification', 'get_employment_verification', 'save_employment_details', 'get_bureau_decision']
+            }
+            
+        except Exception as e:
+            logger.error(f"Error handling email address: {e}")
+            return {
+                'status': 'error',
+                'message': f"Error processing email address: {str(e)}"
+            }
+
+    def handle_aadhaar_upload(self, document_path: str, session_id: str) -> dict:
+        try:
+            logger.info(f"Starting Aadhaar upload processing for session {session_id}")
+            
+            # Extract Aadhaar details using OCR service
+            result = extract_aadhaar_details(document_path)
+            logger.info(f"OCR extraction result: {result}")
+            
+            # Store the OCR result in session data
+            SessionManager.update_session_data_field(session_id, 'ocr_result', result)
+            
+            # Validate extracted data
+            if not result.get('name') or not result.get('aadhaar_number'):
+                return {
+                    'status': 'error',
+                    'message': "Could not extract name or Aadhaar number from the document. Please ensure the document is clear and try again.",
+                    'data': result
+                }
+            
+            # Get session data
+            session_data = SessionManager.get_session_from_db(session_id)
+            if not session_data:
+                return {
+                    'status': 'error',
+                    'message': "Session not found. Please try again."
+                }
+            
+            # Extract user ID from session data
+            user_id = None
+            if isinstance(session_data.get('data'), str):
+                try:
+                    data = json.loads(session_data['data'])
+                    user_id = data.get('userId')
+                except json.JSONDecodeError:
+                    user_id = session_data.get('data')
+            else:
+                user_id = session_data.get('data', {}).get('userId')
+            
+            if not user_id:
+                return {
+                    'status': 'error',
+                    'message': "User ID not found in session. Please try again."
+                }
+            
+            # Get mobile number from session data
+            mobile_number = session_data.get('data', {}).get('mobileNumber') or session_data.get('data', {}).get('phoneNumber') or session_data.get('phone_number')
+            
+            # Prepare basic details from OCR data
+            basic_details = {
+                "userId": user_id,
+                "firstName": result.get('name', ''),
+                "dateOfBirth": result.get('dob', ''),
+                "gender": result.get('gender', ''),
+                "aadhaarNo": result.get('aadhaar_number', ''),
+                "fatherName": result.get('father_name', ''),
+                "mobileNumber": mobile_number,
+                "formStatus": "Basic"
+            }
+            
+            # Save basic details using API client
+            logger.info(f"Saving Aadhaar details for user {user_id}: {basic_details}")
+            try:
+                # Check if method exists
+                if hasattr(self.api_client, 'save_aadhaar_details'):
+                    logger.info("Method save_aadhaar_details found")
+                    save_result = self.api_client.save_aadhaar_details(user_id, basic_details)
+                    logger.info(f"Save result: {save_result}")
+                else:
+                    logger.warning("Method save_aadhaar_details not found, using save_basic_details")
+                    save_result = self.api_client.save_basic_details(user_id, basic_details)
+                    logger.info(f"Fallback save result: {save_result}")
+            except Exception as e:
+                logger.error(f"Error calling save method: {e}")
+                # Try fallback
+                try:
+                    save_result = self.api_client.save_basic_details(user_id, basic_details)
+                    logger.info(f"Fallback save result: {save_result}")
+                except Exception as fallback_error:
+                    logger.error(f"Fallback also failed: {fallback_error}")
+                    raise
+            
+            # Parse the save result
+            if isinstance(save_result, str):
+                try:
+                    save_result_data = json.loads(save_result)
+                except json.JSONDecodeError:
+                    save_result_data = {"status": 500, "message": "Invalid response from save_basic_details"}
+            else:
+                save_result_data = save_result
+            
+            if save_result_data.get('status') != 200:
+                return {
+                    'status': 'error',
+                    'message': "Failed to save basic details. Please try again."
+                }
+            
+            # Process address data if available
+            if result.get('address') or result.get('pincode'):
+                address_data = {
+                    "address": result.get('address', ''),
+                    "pincode": result.get('pincode', ''),
+                    "formStatus": "Address"
+                }
+                
+                # If we have a valid pincode, get city and state from API
+                if address_data.get('pincode') and len(address_data['pincode']) == 6:
+                    try:
+                        pincode_data = self.api_client.state_and_city_by_pincode(address_data['pincode'])
+                        logger.info(f"Pincode API response for pincode {address_data['pincode']}: {pincode_data}")
+                        if pincode_data and pincode_data.get("status") == "success":
+                            # Only update if we get valid non-null data
+                            if pincode_data.get("city") and pincode_data["city"] is not None:
+                                address_data["city"] = pincode_data["city"]
+                            if pincode_data.get("state") and pincode_data["state"] is not None:
+                                address_data["state"] = pincode_data["state"]
+                    except Exception as e:
+                        logger.warning(f"Failed to get city/state from pincode API: {e}")
+                        # Continue with original data if API call fails
+                
+                logger.info(f"Final address data to save: {address_data}")
+                
+                # Save address details
+                address_result = self.api_client.save_address_details(user_id, address_data)
+                address_permanent_result = self.api_client.save_permanent_address_details(user_id, address_data)
+                if isinstance(address_result, str):
+                    try:
+                        address_result_data = json.loads(address_result)
+                    except json.JSONDecodeError:
+                        address_result_data = {"status": 500, "message": "Invalid response from save_address_details"}
+                else:
+                    address_result_data = address_result
+
+                logger.info(f"Address result: {address_result} and address_permanent_result: {address_permanent_result}")
+                
+                if address_result_data.get('status') != 200:
+                    return {
+                        'status': 'warning',
+                        'message': "Basic details saved but failed to save address. Please try again.",
+                        'data': result
+                    }
+            
+            return {
+                'status': 'success',
+                'message': "Successfully processed Aadhaar document and saved details.",
+                'data': result
+            }
+            
+        except Exception as e:
+            logger.error(f"Error handling Aadhaar upload: {e}")
+            return {
+                'status': 'error',
+                'message': f"Error processing Aadhaar document: {str(e)}"
+            }
+
+    def save_gender_details(self, gender: str, session_id: str) -> str:
+        """
+        Save user's gender details
+
+        Args:
+            gender: User's gender (Male/Female/Other)
+            session_id: Session identifier
+
+        Returns:
+            Save result as JSON string
+        """
+        logger.info(f"save_gender_details called with: gender='{gender}', session_id='{session_id}'")
+        try:
+            # Get user ID from session
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                return "Session not found"
+
+            user_id = session.get("data", {}).get("userId")
+            if not user_id:
+                return "User ID not found in session"
+
+            # Get mobile number from session
+            mobile_number = session.get("data", {}).get("mobileNumber") or session.get("data", {}).get("phoneNumber")
+
+            # Prepare data for API
+            details = {
+                "gender": gender,
+                "mobileNumber": mobile_number,
+                "userId": user_id
+            }
+
+            # Store the data being sent to the API
+            SessionManager.update_session_data_field(session_id, "data.api_requests.save_gender_details", {
+                "user_id": user_id,
+                "details": details.copy()
+            })
+
+            # Call API
+            result = self.api_client.save_gender_details(user_id, details)
+
+            # Store the API response
+            SessionManager.update_session_data_field(session_id, "data.api_responses.save_gender_details", result)
+
+            return json.dumps(result)
+
+        except Exception as e:
+            logger.error(f"Error saving gender details: {e}")
+            return f"Error saving gender details: {str(e)}"
+
+    def save_marital_status_details(self, marital_status: str, session_id: str) -> str:
+        """
+        Save user's marital status details
+
+        Args:
+            marital_status: User's marital status (Yes/No)
+            session_id: Session identifier
+
+        Returns:
+            Save result as JSON string
+        """
+        logger.info(f"save_marital_status_details called with: marital_status='{marital_status}', session_id='{session_id}'")
+        try:
+            # Get user ID from session
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                return "Session not found"
+
+            user_id = session.get("data", {}).get("userId")
+            if not user_id:
+                return "User ID not found in session"
+
+            # Get mobile number from session
+            mobile_number = session.get("data", {}).get("mobileNumber") or session.get("data", {}).get("phoneNumber")
+
+            # Format marital status to correct API format
+            formatted_marital_status = self._format_marital_status(marital_status)
+            logger.info(f"Formatted marital status: '{marital_status}' -> '{formatted_marital_status}'")
+
+            # Prepare data for API
+            details = {
+                "maritalStatus": formatted_marital_status,
+                "mobileNumber": mobile_number,
+                "userId": user_id
+            }
+
+            # Store the data being sent to the API
+            SessionManager.update_session_data_field(session_id, "data.api_requests.save_marital_status_details", {
+                "user_id": user_id,
+                "details": details.copy()
+            })
+
+            # Call API
+            result = self.api_client.save_marital_status_details(user_id, details)
+
+            # Store the API response
+            SessionManager.update_session_data_field(session_id, "data.api_responses.save_marital_status_details", result)
+
+            return json.dumps(result)
+
+        except Exception as e:
+            logger.error(f"Error saving marital status details: {e}")
+            return f"Error saving marital status details: {str(e)}"
+
+    def save_education_level_details(self, education_level: str, session_id: str) -> str:
+        """
+        Save user's education level details
+
+        Args:
+            education_level: User's education level (LESS THAN 10TH, PASSED 10TH, etc.)
+            session_id: Session identifier
+
+        Returns:
+            Save result as JSON string
+        """
+        logger.info(f"save_education_level_details called with: education_level='{education_level}', session_id='{session_id}'")
+        try:
+            # Get user ID from session
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                return "Session not found"
+
+            user_id = session.get("data", {}).get("userId")
+            if not user_id:
+                return "User ID not found in session"
+
+            # Get mobile number from session
+            mobile_number = session.get("data", {}).get("mobileNumber") or session.get("data", {}).get("phoneNumber")
+
+            # Format education level to correct API format
+            formatted_education_level = self._format_education_level(education_level)
+            logger.info(f"Formatted education level: '{education_level}' -> '{formatted_education_level}'")
+
+            # Prepare data for API
+            details = {
+                "educationLevel": formatted_education_level,
+                "mobileNumber": mobile_number,
+                "userId": user_id
+            }
+
+            # Store the data being sent to the API
+            SessionManager.update_session_data_field(session_id, "data.api_requests.save_education_level_details", {
+                "user_id": user_id,
+                "details": details.copy()
+            })
+
+            # Call API
+            result = self.api_client.save_education_level_details(user_id, details)
+
+            # Store the API response
+            SessionManager.update_session_data_field(session_id, "data.api_responses.save_education_level_details", result)
+
+            return json.dumps(result)
+
+        except Exception as e:
+            logger.error(f"Error saving education level details: {e}")
+            return f"Error saving education level details: {str(e)}"
+
+    def correct_treatment_name(self, new_treatment_reason: str, session_id: str) -> str:
+        """
+        Correct/update the treatment reason in the loan application
+        
+        Args:
+            new_treatment_reason: The new/corrected treatment reason
+            session_id: Session ID to get user data from
+            
+        Returns:
+            Success or error message
+        """
+        logger.info(f"correct_treatment_name called with: new_treatment_reason='{new_treatment_reason}', session_id='{session_id}'")
+        try:
+            # Get session data
+            session_data = SessionManager.get_session_from_db(session_id)
+            if not session_data:
+                return "❌ Error: Session not found. Please start a new conversation."
+            
+            user_data = session_data.get('data', {})
+            user_id = user_data.get('userId')
+            
+            if not user_id:
+                return "❌ Error: User ID not found in session. Please complete the initial setup first."
+            
+            # Try to get doctor_id and doctor_name from session
+            doctor_id = user_data.get('doctorId') or user_data.get('doctor_id')
+            doctor_name = user_data.get('doctorName') or user_data.get('doctor_name')
+            
+            # Get existing loan data from session
+            loan_data = {
+                "doctorId": doctor_id,
+                "doctorName": doctor_name,
+                "treatmentCost": user_data.get('treatmentCost'),
+                "loanReason": new_treatment_reason,
+                "fullName": user_data.get('fullName')
+            }
+            
+            # Call API to update treatment name
+            response = self.api_client.save_change_treatment_name_details(user_id, loan_data)
+            
+            if response.get("status") == 200:
+                # Update session with new treatment reason
+                SessionManager.update_session_data_field(session_id, "data.treatmentReason", new_treatment_reason)
+                
+                return f"✅ Treatment reason has been successfully updated to '{new_treatment_reason}'!"
+            else:
+                error_msg = response.get("error", "Unknown error occurred")
+                logger.error(f"Failed to update treatment name: {error_msg}")
+                return f"❌ Error updating treatment name: {error_msg}"
+                
+        except Exception as e:
+            logger.error(f"Error in correct_treatment_name: {e}")
+            return f"❌ Error: {str(e)}"
+
+    def correct_treatment_cost(self, new_treatment_cost, session_id: str) -> str:
+        """
+        Correct/update the treatment cost in the loan application
+        
+        Args:
+            new_treatment_cost: The new/corrected treatment cost (must be >= 3000)
+            session_id: Session ID to get user data from
+            
+        Returns:
+            Success or error message
+        """
+        logger.info(f"correct_treatment_cost called with: new_treatment_cost='{new_treatment_cost}', session_id='{session_id}'")
+        try:
+            # Convert to integer if it's a string
+            try:
+                new_treatment_cost = int(new_treatment_cost)
+            except (ValueError, TypeError):
+                return "❌ Error: Please enter a valid numeric amount for the treatment cost."
+            
+            # Validate treatment cost
+            if new_treatment_cost < 3000:
+                return "❌ Error: Treatment cost must be ₹3,000 or more. Please enter a valid amount."
+            
+            # Get session data
+            session_data = SessionManager.get_session_from_db(session_id)
+            if not session_data:
+                return "❌ Error: Session not found. Please start a new conversation."
+            
+            user_data = session_data.get('data', {})
+            user_id = user_data.get('userId')
+            
+            if not user_id:
+                return "❌ Error: User ID not found in session. Please complete the initial setup first."
+            
+            # Get doctor_id and doctor_name from session (handle both possible keys)
+            doctor_id = user_data.get('doctorId') or user_data.get('doctor_id')
+            doctor_name = user_data.get('doctorName') or user_data.get('doctor_name')
+
+            # Get treatment_reason from additional_details if available
+            additional_details = user_data.get('additional_details', {})
+            treatment_reason = additional_details.get('treatment_reason', '')
+
+            # Get existing loan data from session, using treatment_reason from additional_details
+            loan_data = {
+                "doctorId": doctor_id,
+                "doctorName": doctor_name,
+                "treatmentCost": new_treatment_cost,  # Use the new treatment cost
+                "loanReason": treatment_reason,
+                "fullName": user_data.get('fullName')
+            }
+            
+            # Call API to update treatment cost
+            response = self.api_client.save_change_treatment_cost_details(user_id, loan_data)
+            
+            if response.get("status") == 200:
+                # Update session with new treatment cost
+                SessionManager.update_session_data_field(session_id, "data.treatmentCost", new_treatment_cost)
+                
+                return f"✅ Treatment cost has been successfully updated to ₹{new_treatment_cost:,}!"
+            else:
+                error_msg = response.get("error", "Unknown error occurred")
+                logger.error(f"Failed to update treatment cost: {error_msg}")
+                return f"❌ Error updating treatment cost: {error_msg}"
+                
+        except Exception as e:
+            logger.error(f"Error in correct_treatment_cost: {e}")
+            return f"❌ Error: {str(e)}"
+
+    def correct_date_of_birth(self, new_date_of_birth: str, session_id: str) -> str:
+        """
+        Correct/update the date of birth in the user profile
+        
+        Args:
+            new_date_of_birth: The new/corrected date of birth (format: YYYY-MM-DD)
+            session_id: Session ID to get user data from
+            
+        Returns:
+            Success or error message
+        """
+        try:
+            # Validate date format
+            try:
+                datetime.strptime(new_date_of_birth, '%Y-%m-%d')
+            except ValueError:
+                return "❌ Error: Please enter the date in YYYY-MM-DD format (e.g., 1990-01-15)."
+            
+            # Get session data
+            session_data = SessionManager.get_session_from_db(session_id)
+            if not session_data:
+                return "❌ Error: Session not found. Please start a new conversation."
+            
+            
+            user_data = session_data.get('data', {})
+            user_id = user_data.get('userId')
+            phone_number = user_data.get('phoneNumber')
+            
+            if not user_id:
+                return "❌ Error: User ID not found in session. Please complete the initial setup first."
+            
+            if not phone_number:
+                return "❌ Error: Phone number not found in session. Please complete the initial setup first."
+            
+            # Prepare details for API
+            details = {
+                "dateOfBirth": new_date_of_birth,
+                "mobileNumber": phone_number,
+                "userId": user_id
+            }
+            
+            # Call API to update date of birth
+            response = self.api_client.save_change_date_of_birth_details(user_id, details)
+            
+            if response.get("status") == 200:
+                # Update session with new date of birth
+                SessionManager.update_session_data_field(session_id, "data.dateOfBirth", new_date_of_birth)
+                
+                return f"✅ Date of birth has been successfully updated to {new_date_of_birth}!"
+            else:
+                error_msg = response.get("error", "Unknown error occurred")
+                logger.error(f"Failed to update date of birth: {error_msg}")
+                return f"❌ Error updating date of birth: {error_msg}"
+                
+        except Exception as e:
+            logger.error(f"Error in correct_date_of_birth: {e}")
+            return f"❌ Error: {str(e)}"
+
+    def handle_pan_card_upload(self, document_path: str, session_id: str, ocr_result: dict = None) -> dict:
+        """
+        Handle PAN card upload and save extracted details
+        
+        Args:
+            document_path: Path to the uploaded PAN card document
+            session_id: Session ID to get user data from
+            ocr_result: Pre-extracted OCR result (optional)
+            
+        Returns:
+            Dictionary with status and message
+        """
+        try:
+            # Get session data
+            session_data = SessionManager.get_session_from_db(session_id)
+            if not session_data:
+                return {
+                    'status': 'error',
+                    'message': 'Session not found. Please start a new conversation.'
+                }
+            
+            user_data = session_data.get('data', {})
+            user_id = user_data.get('userId')
+            phone_number = user_data.get('phoneNumber')
+            
+            if not user_id:
+                return {
+                    'status': 'error',
+                    'message': 'User ID not found in session. Please complete the initial setup first.'
+                }
+            
+            if not phone_number:
+                return {
+                    'status': 'error',
+                    'message': 'Phone number not found in session. Please complete the initial setup first.'
+                }
+            
+            # Extract PAN details if not provided
+            if not ocr_result:
+                from cpapp.services.ocr_service import extract_pan_details
+                ocr_result = extract_pan_details(document_path)
+            
+            # Validate OCR result
+            if not ocr_result or not any(ocr_result.values()):
+                return {
+                    'status': 'error',
+                    'message': 'Failed to extract PAN card details from the uploaded document.'
+                }
+            
+            pan_card_number = ocr_result.get('pan_card_number', '')
+            person_name = ocr_result.get('person_name', '')
+            date_of_birth = ocr_result.get('date_of_birth', '')
+            gender = ocr_result.get('gender', '')
+            father_name = ocr_result.get('father_name', '')
+            
+            # Validate PAN card number
+            if not pan_card_number:
+                return {
+                    'status': 'error',
+                    'message': 'Could not extract PAN card number from the document.'
+                }
+            
+            # Save PAN card number to API
+            pan_details = {
+                "panCard": pan_card_number,
+                "mobileNumber": phone_number
+            }
+            
+            pan_response = self.api_client.save_panCard_details(user_id, pan_details)
+            
+            if pan_response.get("status") != 200:
+                logger.error(f"Failed to save PAN card number: {pan_response}")
+                return {
+                    'status': 'error',
+                    'message': f'Failed to save PAN card number: {pan_response.get("error", "Unknown error")}'
+                }
+            
+            # Save other details if available
+            details_to_save = {}
+            
+            if person_name:
+                details_to_save["fullName"] = person_name
+            
+            if date_of_birth:
+                details_to_save["dateOfBirth"] = date_of_birth
+            
+            if gender:
+                details_to_save["gender"] = gender
+            
+            if father_name:
+                details_to_save["fatherName"] = father_name
+            
+            # Save additional details if any
+            if details_to_save:
+                details_to_save["mobileNumber"] = phone_number
+                basic_response = self.api_client.save_basic_details(user_id, details_to_save)
+                
+                if basic_response.get("status") != 200:
+                    logger.warning(f"Failed to save additional PAN details: {basic_response}")
+                    # Continue anyway as PAN card number was saved successfully
+            
+            # Update session with extracted data
+            SessionManager.update_session_data_field(session_id, "data.panCard", pan_card_number)
+            if person_name:
+                SessionManager.update_session_data_field(session_id, "data.fullName", person_name)
+            if date_of_birth:
+                SessionManager.update_session_data_field(session_id, "data.dateOfBirth", date_of_birth)
+            if gender:
+                SessionManager.update_session_data_field(session_id, "data.gender", gender)
+            if father_name:
+                SessionManager.update_session_data_field(session_id, "data.fatherName", father_name)
+            
+            # Store OCR result in session
+            SessionManager.update_session_data_field(session_id, "data.pan_ocr_result", ocr_result)
+            
+            # Prepare success message
+            success_parts = [f"✅ PAN card number: {pan_card_number}"]
+            if person_name:
+                success_parts.append(f"Name: {person_name}")
+            if date_of_birth:
+                success_parts.append(f"Date of Birth: {date_of_birth}")
+            if gender:
+                success_parts.append(f"Gender: {gender}")
+            if father_name:
+                success_parts.append(f"Father's Name: {father_name}")
+            
+            success_message = " | ".join(success_parts)
+            
+            return {
+                'status': 'success',
+                'message': f'PAN card processed successfully! {success_message}',
+                'data': ocr_result
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in handle_pan_card_upload: {e}")
+            return {
+                'status': 'error',
+                'message': f'Error processing PAN card: {str(e)}'
+            }
+
+    def _format_marital_status(self, marital_status: str) -> str:
+        """
+        Format marital status to the correct API format
+        
+        Args:
+            marital_status: Raw marital status input
+            
+        Returns:
+            Formatted marital status for API
+        """
+        if not marital_status:
+            return "No"
+        
+        # Convert to lowercase for easier comparison
+        status_lower = marital_status.lower().strip()
+        
+        # Map various inputs to correct API format
+        married_variants = ["married", "yes", "1", "marriage"]
+        unmarried_variants = ["unmarried", "single", "no", "2", "unmarried/single", "unmarried/single", "unmarried or single"]
+        
+        if status_lower in married_variants:
+            return "Yes"
+        elif status_lower in unmarried_variants:
+            return "No"
+        else:
+            # If it's already in correct format, return as-is
+            if marital_status in ["Yes", "No"]:
+                return marital_status
+            # Default to "No" for unrecognized values
+            logger.warning(f"Unrecognized marital status: '{marital_status}', defaulting to 'No'")
+            return "No"
+
+    def _format_education_level(self, education_level: str) -> str:
+        """
+        Format education level to the correct API format
+        
+        Args:
+            education_level: Raw education level input
+            
+        Returns:
+            Formatted education level for API
+        """
+        if not education_level:
+            return "LESS THAN 10TH"
+        
+        # Convert to lowercase for easier comparison
+        level_lower = education_level.lower().strip()
+        
+        # Map various inputs to correct API format
+        education_mapping = {
+            # Number mappings
+            "1": "LESS THAN 10TH",
+            "2": "PASSED 10TH", 
+            "3": "PASSED 12TH",
+            "4": "DIPLOMA",
+            "5": "GRADUATION",
+            "6": "POST GRADUATION",
+            "7": "P.H.D.",
+            
+            # Text mappings
+            "less than 10th": "LESS THAN 10TH",
+            "less than 10": "LESS THAN 10TH",
+            "below 10th": "LESS THAN 10TH",
+            "below 10": "LESS THAN 10TH",
+            "under 10th": "LESS THAN 10TH",
+            "under 10": "LESS THAN 10TH",
+            
+            "passed 10th": "PASSED 10TH",
+            "10th": "PASSED 10TH",
+            "10th standard": "PASSED 10TH",
+            "sslc": "PASSED 10TH",
+            
+            "passed 12th": "PASSED 12TH",
+            "12th": "PASSED 12TH",
+            "12th standard": "PASSED 12TH",
+            "hsc": "PASSED 12TH",
+            "higher secondary": "PASSED 12TH",
+            
+            "diploma": "DIPLOMA",
+            "diploma course": "DIPLOMA",
+            
+            "graduation": "GRADUATION",
+            "graduate": "GRADUATION",
+            "bachelor": "GRADUATION",
+            "bachelor's": "GRADUATION",
+            "bachelors": "GRADUATION",
+            "b.tech": "GRADUATION",
+            "b.e": "GRADUATION",
+            "b.com": "GRADUATION",
+            "b.sc": "GRADUATION",
+            "b.a": "GRADUATION",
+            "b.b.a": "GRADUATION",
+            "b.c.a": "GRADUATION",
+            
+            "post graduation": "POST GRADUATION",
+            "post graduate": "POST GRADUATION",
+            "postgraduate": "POST GRADUATION",
+            "master": "POST GRADUATION",
+            "master's": "POST GRADUATION",
+            "masters": "POST GRADUATION",
+            "m.tech": "POST GRADUATION",
+            "m.e": "POST GRADUATION",
+            "m.com": "POST GRADUATION",
+            "m.sc": "POST GRADUATION",
+            "m.a": "POST GRADUATION",
+            "m.b.a": "POST GRADUATION",
+            "m.c.a": "POST GRADUATION",
+            
+            "p.h.d": "P.H.D.",
+            "phd": "P.H.D.",
+            "doctorate": "P.H.D.",
+            "doctor of philosophy": "P.H.D.",
+            "ph.d": "P.H.D.",
+            "ph.d.": "P.H.D.",
+        }
+        
+        # Check if it's already in correct format
+        if education_level in ["LESS THAN 10TH", "PASSED 10TH", "PASSED 12TH", "DIPLOMA", "GRADUATION", "POST GRADUATION", "P.H.D."]:
+            return education_level
+        
+        # Try to find a match
+        for key, value in education_mapping.items():
+            if level_lower == key.lower():
+                return value
+        
+        # If no exact match, try partial matching
+        for key, value in education_mapping.items():
+            if key.lower() in level_lower or level_lower in key.lower():
+                logger.info(f"Partial match found for education level: '{education_level}' -> '{value}'")
+                return value
+        
+        # Default to "LESS THAN 10TH" for unrecognized values
+        logger.warning(f"Unrecognized education level: '{education_level}', defaulting to 'LESS THAN 10TH'")
+        return "LESS THAN 10TH"

@@ -10,14 +10,7 @@ from django.http import Http404
 from asgiref.sync import async_to_sync
 import datetime
 # Import and set up environment variables first
-import sys
 import os
-from pathlib import Path
-
-# Add the project root to the Python path
-sys.path.append(str(Path(__file__).resolve().parent.parent.parent.parent))
-from setup_env import setup_environment
-setup_environment()
 
 from cpapp.services.agent import CarepayAgent
 from cpapp.api.login.authentication import JWTAuthentication
