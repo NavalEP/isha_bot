@@ -1580,15 +1580,16 @@ class CarepayAgent:
         """
         try:
             # 1. Get user_id if not provided
+            session = None
             if session_id:
                 session = SessionManager.get_session_from_db(session_id)
-                
-            user_id = session.get("data", {}).get("userId")
+            user_id = session.get("data", {}).get("userId") if session else None
             if not user_id:
                 return "User ID is required to process prefill data"
 
             # 2. Get prefill data from API response in session
             prefill_data = {}
+            session_data = {}
             if session_id:
                 session = SessionManager.get_session_from_db(session_id)
                 if session and "data" in session:
@@ -1596,9 +1597,7 @@ class CarepayAgent:
                     api_responses = session_data.get("api_responses", {})
                     prefill_api_result = api_responses.get("get_prefill_data")
                     if prefill_api_result and isinstance(prefill_api_result, dict):
-                        # The actual prefill data is usually under "data" -> "response"
                         prefill_data = prefill_api_result.get("data", {}).get("response", {})
-                    # Fallback: try "prefill_api_response" if not found above
                     if not prefill_data and "prefill_api_response" in session_data:
                         prefill_data = session_data["prefill_api_response"]
 
@@ -1606,24 +1605,17 @@ class CarepayAgent:
             data = {"userId": user_id, "formStatus": "Basic"}
 
             # 4. Get name and phone from session if available
-            session_data = {}
-            if session_id:
-                session = SessionManager.get_session_from_db(session_id)
-                if session and "data" in session:
-                    session_data = session["data"]
-
-            # Add name from session if available
-            if "name" in session_data:
+            # (session_data already set above)
+            if "name" in session_data and session_data["name"] is not None:
                 data["firstName"] = session_data["name"]
-            elif "fullName" in session_data:
+            elif "fullName" in session_data and session_data["fullName"] is not None:
                 data["firstName"] = session_data["fullName"]
 
-            # Add phone number from session if available
-            if "phone" in session_data:
+            if "phone" in session_data and session_data["phone"] is not None:
                 data["mobileNumber"] = session_data["phone"]
-            elif "phoneNumber" in session_data:
+            elif "phoneNumber" in session_data and session_data["phoneNumber"] is not None:
                 data["mobileNumber"] = session_data["phoneNumber"]
-            elif "mobileNumber" in session_data:
+            elif "mobileNumber" in session_data and session_data["mobileNumber"] is not None:
                 data["mobileNumber"] = session_data["mobileNumber"]
 
             # 5. Extract fields from prefill_data (from API response)
@@ -1637,41 +1629,35 @@ class CarepayAgent:
 
             for target_field, source_fields in field_mappings.items():
                 for source in source_fields:
-                    if source in prefill_data and prefill_data[source]:
+                    if source in prefill_data and prefill_data[source] is not None:
                         value = prefill_data[source]
-                        
                         # Special handling for name fields to ensure we get a string
                         if target_field == "firstName":
                             if isinstance(value, dict):
-                                # If it's a dict, try to extract firstName or name
-                                if "firstName" in value:
-                                    data[target_field] = str(value["firstName"])
-                                elif "name" in value:
-                                    data[target_field] = str(value["name"])
-                                elif "fullName" in value:
+                                if "fullName" in value and value["fullName"] is not None:
                                     data[target_field] = str(value["fullName"])
+                                elif "name" in value and value["name"] is not None:
+                                    data[target_field] = str(value["name"])
+                                elif "firstName" in value and value["firstName"] is not None:
+                                    data[target_field] = str(value["firstName"])
                                 else:
-                                    # If no clear name field, skip this value
                                     continue
                             elif isinstance(value, str):
                                 data[target_field] = value
                             else:
-                                # Convert to string for other types
                                 data[target_field] = str(value)
                         else:
-                            # For non-name fields, ensure it's a string
                             if isinstance(value, (dict, list)):
-                                # Skip complex objects for non-name fields
                                 continue
                             else:
                                 data[target_field] = str(value)
                         break
 
             # Special handling for email if it's a list or dict
-            if "email" in prefill_data and prefill_data["email"] and "emailId" not in data:
+            if "email" in prefill_data and prefill_data["email"] is not None and "emailId" not in data:
                 email_data = prefill_data["email"]
                 if isinstance(email_data, list) and email_data:
-                    if isinstance(email_data[0], dict) and "email" in email_data[0]:
+                    if isinstance(email_data[0], dict) and "email" in email_data[0] and email_data[0]["email"] is not None:
                         data["emailId"] = email_data[0]["email"]
                     else:
                         data["emailId"] = email_data[0]
@@ -1683,47 +1669,40 @@ class CarepayAgent:
                 response = prefill_data["response"]
                 for target_field, source_fields in field_mappings.items():
                     for source in source_fields:
-                        if source in response and response[source] and target_field not in data:
+                        if source in response and response[source] is not None and target_field not in data:
                             value = response[source]
-                            
-                            # Special handling for name fields to ensure we get a string
                             if target_field == "firstName":
                                 if isinstance(value, dict):
-                                    # If it's a dict, try to extract firstName or name
-                                    if "firstName" in value:
-                                        data[target_field] = str(value["firstName"])
-                                    elif "name" in value:
-                                        data[target_field] = str(value["name"])
-                                    elif "fullName" in value:
+                                    if "fullName" in value and value["fullName"] is not None:
                                         data[target_field] = str(value["fullName"])
+                                    elif "firstName" in value and value["firstName"] is not None:
+                                        data[target_field] = str(value["firstName"])
+                                    elif "name" in value and value["name"] is not None:
+                                        data[target_field] = str(value["name"])
                                     else:
-                                        # If no clear name field, skip this value
                                         continue
                                 elif isinstance(value, str):
                                     data[target_field] = value
                                 else:
-                                    # Convert to string for other types
                                     data[target_field] = str(value)
                             else:
-                                # For non-name fields, ensure it's a string
                                 if isinstance(value, (dict, list)):
-                                    # Skip complex objects for non-name fields
                                     continue
                                 else:
                                     data[target_field] = str(value)
                             break
                 # Special handling for email in nested response
-                if "email" in response and response["email"] and "emailId" not in data:
+                if "email" in response and response["email"] is not None and "emailId" not in data:
                     email_data = response["email"]
                     if isinstance(email_data, list) and email_data:
-                        if isinstance(email_data[0], dict) and "email" in email_data[0]:
+                        if isinstance(email_data[0], dict) and "email" in email_data[0] and email_data[0]["email"] is not None:
                             data["emailId"] = email_data[0]["email"]
                         else:
                             data["emailId"] = email_data[0]
                     else:
                         data["emailId"] = email_data
                 # Handle phone number in response if needed
-                if "mobile" in response and response["mobile"] and "mobileNumber" not in data:
+                if "mobile" in response and response["mobile"] is not None and "mobileNumber" not in data:
                     data["mobileNumber"] = response["mobile"]
 
             # Debug log what we're sending
@@ -1732,7 +1711,7 @@ class CarepayAgent:
             # Store the processed data in session for other methods to use
             if session_id:
                 for key, value in data.items():
-                    if key != "userId":  # Don't overwrite userId
+                    if key != "userId":
                         SessionManager.update_session_data_field(session_id, f"data.{key}", value)
                 logger.info(f"Stored processed prefill data in session: {data}")
 
