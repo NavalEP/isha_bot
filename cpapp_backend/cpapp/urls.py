@@ -3,6 +3,7 @@ from django.http import JsonResponse
 from cpapp.api.chat.views import ChatSessionView, ChatMessageView, SessionDetailsView, ShortlinkRedirectView
 from cpapp.api.login.views import SendOtpView, VerifyOtpView, DoctorStaffView
 from cpapp.api.document.views import AadhaarUploadView, PanCardUploadView
+from cpapp.api.treatment.views import TreatmentSearchView, TreatmentCategoriesView
 
 
 def api_root_view(request):
@@ -19,4 +20,6 @@ urlpatterns = [
     path('s/<str:short_code>/', ShortlinkRedirectView.as_view(), name='shortlink_redirect'),
     path('documents/upload/', AadhaarUploadView.as_view(), name='aadhaar_upload'),
     path('documents/upload-pan/', PanCardUploadView.as_view(), name='pan_card_upload'),
+    path('treatments/search/', TreatmentSearchView.as_view(), name='treatment_search'),
+    path('treatments/categories/', TreatmentCategoriesView.as_view(), name='treatment_categories'),
 ]
