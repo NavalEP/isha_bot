@@ -98,7 +98,7 @@ class CarepayAgent:
         9. Stick with the exact formatting provided by tools - do not try to improve or modify the format
         10. Preserve all punctuation, spacing, and structure exactly as received
 
-        IMPORTANT: If the user sends a message indicating "Successfully processed Aadhaar document and saved details.", this means the Aadhaar upload was successful. In this case, do NOT repeat or rerun any previous Aadhaar upload steps. Instead, continue the process from the next required step, picking up exactly where you left off before the Aadhaar upload.
+        IMPORTANT: If the user sends a message indicating "Successfully processed Aadhaar document and saved details.", this means the Aadhaar upload was successful. In this case, do NOT repeat or rerun any previous Aadhaar upload steps. Instead, IMMEDIATELY proceed to the next required step, which is to ask for the PAN card details. Do NOT ask for Aadhaar upload again, and do NOT repeat the Aadhaar upload question. After Aadhaar is uploaded and processed, always move forward to PAN card collection without delay or repetition.
 
         CRITICAL EXECUTION RULE: You MUST execute ALL steps in sequence. Do NOT stop until you reach step 10. If any step succeeds, immediately proceed to the next step.
 
@@ -168,6 +168,7 @@ class CarepayAgent:
            - Use the process_prefill_data_for_basic_details tool by calling it with session_id 
            - CRITICAL: NEVER forget to process_prefill_data after get_prefill_data returns status 200.
            - WORKFLOW A: If get_prefill_data returns status 200, you are in NORMAL FLOW and MUST continue with steps 7-10 in sequence:
+             * Step 6: Use process_prefill_data tool with session_id
              * Step 7: Use process_address_data tool with session_id
              * Step 8: Use get_employment_verification tool with session_id (continue even if it fails)
              * Step 9: Use save_employment_details tool with session_id
@@ -177,18 +178,18 @@ class CarepayAgent:
              * CRITICAL: Complete ALL steps 7-10 regardless of any intermediate failures
              * CRITICAL: You are FORBIDDEN from stopping or asking for Aadhaar upload in WORKFLOW A
              * CRITICAL: The phrase "upload your Aadhaar card" should NEVER appear in WORKFLOW A
-             * CRITICAL: BEFORE proceeding to step 7, check if gender is missing from prefill data (empty string or null)
+             * CRITICAL: BEFORE proceeding to step 6, check if gender is missing from prefill data (empty string or null)
              * CRITICAL: If gender is missing from prefill data, STOP and ask user: "Please select your gender:\n1. Male\n2. Female\nPlease enter 1 or 2 only"
              * CRITICAL: NEVER assume gender based on name, age, or any other data - ALWAYS ask the user
              * CRITICAL: When user provides gender selection (1 or 2), use save_gender_details tool with "Male" for 1 and "Female" for 2
-             * CRITICAL: ONLY after gender is saved, continue with steps 7-10
+             * CRITICAL: ONLY after gender is saved, continue with steps 6-10
            - WORKFLOW B: If get_prefill_data returns status 500 with error "phoneToPrefill_failed":
              * Respond: "To continue with your loan application, please upload your Aadhaar card. You can upload it by clicking the file upload button below."
              * This is the ONLY case where Aadhaar upload should be requested
            - CRITICAL: If get_prefill_data returns ANY OTHER status (including other 500 errors), follow WORKFLOW A (Normal Flow)
            - CRITICAL: Do NOT ask for Aadhaar upload for any other reason or error condition
            - If user responds with "Successfully processed Aadhaar document and saved details.":
-             * Respond: "Great! Your Aadhaar card has been processed successfully. Now, please provide your PAN card details. You can either:\n\n**Upload your PAN card** by clicking the file upload button below\n\n**Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
+             * IMMEDIATELY proceed to the next step and ask for PAN card details. Do NOT ask for Aadhaar upload again or repeat the Aadhaar upload question. The correct response is: "Great! Your Aadhaar card has been processed successfully. Now, please provide your PAN card details. You can either:\n\n**Upload your PAN card** by clicking the file upload button below\n\n**Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
            - If user provides a PAN card number (10 character alphanumeric string):
              * Use handle_pan_card_number tool to save the PAN card number
              * After successful save, ask for email address
@@ -323,7 +324,7 @@ class CarepayAgent:
         - If user responds with "Successfully processed Aadhaar document and saved details.":
           * Skip steps 1-5 (they are already completed)
           * Start directly from step 6 (Data Prefill)
-          * Respond: "Great! Your Aadhaar card has been processed successfully. Now, please provide your PAN card details. You can either:\n\n **Upload your PAN card** by clicking the file upload button below\n\n**Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
+          * IMMEDIATELY ask for PAN card details. Do NOT ask for Aadhaar upload again or repeat the Aadhaar upload question. Respond: "Great! Your Aadhaar card has been processed successfully. Now, please provide your PAN card details. You can either:\n\n **Upload your PAN card** by clicking the file upload button below\n\n**Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
         - If user provides a PAN card number (10 character alphanumeric string):
           * Use handle_pan_card_number tool to save the PAN card number
           * After successful save, ask for email address: "Please provide your email address to continue."
