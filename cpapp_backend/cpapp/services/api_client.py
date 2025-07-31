@@ -677,3 +677,16 @@ class CarepayAPIClient:
             "userId": user_id
         }
         return self._make_request('POST', endpoint, data=data)
+    
+    def save_prefill_details(self, user_id: str, details: Dict[str, Any]) -> Dict[str, Any]:
+        """Save basic personal details"""
+        endpoint = f"userDetails/basicDetail"
+        data = {
+            "dateOfBirth": details.get("dateOfBirth", None),
+            "emailId": details.get("emailId", None),
+            "gender": details.get("gender", None),
+            "mobileNumber": details.get("mobileNumber"),
+            "panCard": details.get("panCard", None),
+            "userId": user_id
+        }
+        return self._make_request('POST', endpoint, data=data)

@@ -60,15 +60,9 @@ class CarepayAgent:
 
         CRITICAL TREATMENT REASON HANDLING: When a user provides a treatment reason like "hair transplant", "dental surgery", etc., you MUST call the correct_treatment_reason tool immediately. Do NOT ask for confirmation or additional information - just call the tool with the provided treatment reason.
 
-        CRITICAL TREATMENT COST HANDLING: When a user provides a treatment cost like "5000", "10000", "90000", etc., you MUST call the correct_treatment_cost tool immediately. Do NOT ask for confirmation or additional information - just call the tool with the provided treatment cost amount. If the user provides a numeric value that looks like a treatment cost, call the tool immediately.
-
         CRITICAL RESPONSE GENERATION RULE: You are FORBIDDEN from generating success messages like "Your X has been successfully updated" without first calling the appropriate tool. You MUST call the tool first, then use the tool's response to determine what to tell the user. If the tool returns an error, tell the user about the error. If the tool returns success, tell the user about the success.
 
         CRITICAL TOOL CALLING ENFORCEMENT: When a user provides ANY information that needs to be saved (treatment cost, treatment reason, gender, marital status, education level, date of birth), you MUST call the corresponding tool BEFORE generating any response. NEVER generate a success message without calling the tool first. This is a CRITICAL rule that must be followed.
-
-        CRITICAL TREATMENT COST ENFORCEMENT: When a user provides a numeric value like "90000" after you ask for treatment cost, you MUST call the correct_treatment_cost tool immediately. Do NOT generate a success message like "Your treatment cost has been successfully updated" without calling the tool first. This is a CRITICAL error that must be avoided.
-
-        CRITICAL SCENARIO: If you ask "To change your treatment cost, please provide the new treatment cost amount" and the user responds with a number like "90000", you MUST call the correct_treatment_cost tool with "90000" as the parameter. Do NOT respond with "Your treatment cost has been successfully updated to ₹90,000" without calling the tool first.
 
         CRITICAL ERROR PATTERN TO AVOID: 
         - DO NOT generate: "Your treatment cost has been successfully updated to ₹90,000"
@@ -77,9 +71,6 @@ class CarepayAgent:
         - ALWAYS call the tool first, then use the tool's response to inform the user
         - DO NOT ask for Aadhaar upload after Aadhaar has already been successfully processed
         - DO NOT repeat "Please upload your Aadhaar card" after Aadhaar upload is complete
-
-        CRITICAL TREATMENT COST TOOL CALLING:
-        - When user provides treatment cost: call correct_treatment_cost tool
         - When user provides treatment reason: call correct_treatment_reason tool
         - When user provides gender: call save_gender_details tool
         - When user provides marital status: call save_marital_status_details tool
@@ -246,8 +237,7 @@ class CarepayAgent:
           * User: "I want to change treatment reason" → Ask: "Please provide the new treatment reason"
           * User: "hair transplant" → IMMEDIATELY call correct_treatment_reason tool with "hair transplant"
           * User: "I want to change treatment cost" → Ask: "Please provide the new treatment cost"
-          * User: "5000" → IMMEDIATELY call correct_treatment_cost tool with "5000"
-          * User: "90000" → IMMEDIATELY call correct_treatment_cost tool with "90000"
+       
 
         CRITICAL DETAIL UPDATE HANDLING:
         - When a user provides gender selection (Male, Female, 1, 2), IMMEDIATELY call save_gender_details tool
@@ -1621,37 +1611,20 @@ class CarepayAgent:
 
             # 5. Extract fields from prefill_data (from API response)
             field_mappings = {
-                "panCard": ["pan", "panCard", "panNo", "panNumber", "pan_card", "pan_number"],
-                "gender": ["gender", "sex"],
-                "dateOfBirth": ["dateOfBirth", "dob", "birthDate", "birth_date", "date_of_birth"],
-                "emailId": ["emailId", "email", "email_id", "emailAddress", "email_address"],
-                "firstName": ["firstName", "name", "first_name", "fullName", "full_name", "givenName", "given_name"]
+                "panCard": ["pan"],
+                "gender": ["gender"],
+                "dateOfBirth": ["dob"],
+                "emailId": ["email"],
             }
 
             for target_field, source_fields in field_mappings.items():
                 for source in source_fields:
                     if source in prefill_data and prefill_data[source] is not None:
                         value = prefill_data[source]
-                        # Special handling for name fields to ensure we get a string
-                        if target_field == "firstName":
-                            if isinstance(value, dict):
-                                if "fullName" in value and value["fullName"] is not None:
-                                    data[target_field] = str(value["fullName"])
-                                elif "name" in value and value["name"] is not None:
-                                    data[target_field] = str(value["name"])
-                                elif "firstName" in value and value["firstName"] is not None:
-                                    data[target_field] = str(value["firstName"])
-                                else:
-                                    continue
-                            elif isinstance(value, str):
-                                data[target_field] = value
-                            else:
-                                data[target_field] = str(value)
+                        if isinstance(value, (dict, list)):
+                            continue
                         else:
-                            if isinstance(value, (dict, list)):
-                                continue
-                            else:
-                                data[target_field] = str(value)
+                            data[target_field] = str(value)
                         break
 
             # Special handling for email if it's a list or dict
@@ -1662,8 +1635,9 @@ class CarepayAgent:
                         data["emailId"] = email_data[0]["email"]
                     else:
                         data["emailId"] = email_data[0]
-                else:
+                elif isinstance(email_data, str) and email_data.strip():
                     data["emailId"] = email_data
+                # If email_data is None, empty string, empty list, or invalid, don't set emailId
 
             # Also extract from nested "response" if it exists (sometimes API nests again)
             if "response" in prefill_data and isinstance(prefill_data["response"], dict):
@@ -1672,36 +1646,26 @@ class CarepayAgent:
                     for source in source_fields:
                         if source in response and response[source] is not None and target_field not in data:
                             value = response[source]
-                            if target_field == "firstName":
-                                if isinstance(value, dict):
-                                    if "fullName" in value and value["fullName"] is not None:
-                                        data[target_field] = str(value["fullName"])
-                                    elif "firstName" in value and value["firstName"] is not None:
-                                        data[target_field] = str(value["firstName"])
-                                    elif "name" in value and value["name"] is not None:
-                                        data[target_field] = str(value["name"])
-                                    else:
-                                        continue
-                                elif isinstance(value, str):
-                                    data[target_field] = value
-                                else:
-                                    data[target_field] = str(value)
+                            if isinstance(value, (dict, list)):
+                                continue
                             else:
-                                if isinstance(value, (dict, list)):
-                                    continue
-                                else:
-                                    data[target_field] = str(value)
+                                data[target_field] = str(value)
                             break
                 # Special handling for email in nested response
                 if "email" in response and response["email"] is not None and "emailId" not in data:
                     email_data = response["email"]
-                    if isinstance(email_data, list) and email_data:
-                        if isinstance(email_data[0], dict) and "email" in email_data[0] and email_data[0]["email"] is not None:
-                            data["emailId"] = email_data[0]["email"]
-                        else:
-                            data["emailId"] = email_data[0]
-                    else:
-                        data["emailId"] = email_data
+                    if isinstance(email_data, list):
+                        if email_data:  # list is not empty
+                            if isinstance(email_data[0], dict) and "email" in email_data[0] and email_data[0]["email"] is not None:
+                                data["emailId"] = str(email_data[0]["email"])
+                            else:
+                                data["emailId"] = str(email_data[0])
+                        # if list is empty, do not set emailId
+                    elif isinstance(email_data, dict) and "email" in email_data and email_data["email"] is not None:
+                        data["emailId"] = str(email_data["email"])
+                    elif isinstance(email_data, str) and email_data.strip():
+                        data["emailId"] = str(email_data)
+                    # If email_data is None, empty string, empty list, or invalid, don't set emailId
                 # Handle phone number in response if needed
                 if "mobile" in response and response["mobile"] is not None and "mobileNumber" not in data:
                     data["mobileNumber"] = response["mobile"]
@@ -1717,7 +1681,10 @@ class CarepayAgent:
                 logger.info(f"Stored processed prefill data in session: {data}")
 
             # Call the API client to save basic details
-            result = self.api_client.save_basic_details(user_id, data)
+            result = self.api_client.save_prefill_details(user_id, data)
+            logger.info(f"Saved prefill details: {result}")
+            if session_id:
+                SessionManager.update_session_data_field(session_id, "data.api_responses.save_prefill_details", result)
             return json.dumps(result)
         except Exception as e:
             logger.error(f"Error processing prefill data: {e}")
