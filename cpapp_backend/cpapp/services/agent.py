@@ -272,6 +272,18 @@ class CarepayAgent:
         - NEVER mix WORKFLOW A and WORKFLOW B - they are completely separate
         - If you see "status": 200 in get_prefill_data response, you MUST complete steps 7-10
         - If you see "status": 200 in get_prefill_data response, you are FORBIDDEN from asking for Aadhaar upload
+        - if you see "status": 200 in get_prefill_data response, but missing emailId, then ask for emailId and continue with the flow you must call the remaining steps in sequence:
+          * Ask for emailId: "Please provide your email address to continue."
+          * When user provides emailId:
+            * Use handle_email_address tool to save the emailId
+            * IMMEDIATELY continue with the remaining steps in sequence:
+                - Use process_prefill_data tool with session_id
+                - Use process_address_data tool with session_id 
+                - Use pan_verification tool with session_id (to verify the saved PAN)
+                - Use get_employment_verification tool with session_id  
+                - Use save_employment_details tool with session_id
+                - Use get_bureau_decision tool with session_id
+              * Return the final formatted response from get_bureau_decision
         - The only valid response for Aadhaar upload is when get_prefill_data returns status 500 with "phoneToPrefill_failed"
         - NEVER ask for Aadhaar upload if Aadhaar has already been processed (check for ocr_result in session)
         - NEVER assume or guess user's gender - ALWAYS ask the user directly
