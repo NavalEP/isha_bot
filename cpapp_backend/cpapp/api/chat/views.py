@@ -4,6 +4,8 @@ from django.http import JsonResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from django.shortcuts import redirect
+from django.http import Http404
 
 from asgiref.sync import async_to_sync
 import datetime
@@ -19,6 +21,7 @@ setup_environment()
 
 from cpapp.services.agent import CarepayAgent
 from cpapp.api.login.authentication import JWTAuthentication
+from cpapp.services.url_shortener import get_long_url
 import jwt
 from django.conf import settings
 from cpapp.models.session_data import SessionData
@@ -31,6 +34,47 @@ logger = logging.getLogger(__name__)
 carepay_agent = CarepayAgent()
 
 
+class ShortlinkRedirectView(APIView):
+    """
+    View for returning long URLs from short codes
+    """
+    
+    def get(self, request, short_code):
+        """
+        Get the long URL for a short code
+        
+        Args:
+            request: Django request object
+            short_code: The short code from the URL
+            
+        Returns:
+            JSON response containing the long URL
+        """
+        try:
+            # Get the long URL from the short code
+            long_url = get_long_url(short_code)
+            
+            if long_url:
+                return JsonResponse({
+                    "status": "success",
+                    "long_url": long_url
+                })
+            else:
+                # If short code not found, return 404
+                return JsonResponse({
+                    "status": "error",
+                    "message": "Short link not found"
+                }, status=404)
+                
+        except Exception as e:
+            # Log the error and return 404
+            logger.error(f"Error getting long URL for short code {short_code}: {e}")
+            return JsonResponse({
+                "status": "error", 
+                "message": "Short link not found"
+            }, status=404)
+
+
 class ChatSessionView(APIView):
     """
     View for creating new chat sessions
@@ -40,12 +84,20 @@ class ChatSessionView(APIView):
     
     def post(self, request):
         try:
-            # Get phone number from authenticated user
-            phone_number = request.user
+            # Check if user is authenticated
+            if not request.user or request.user == 'AnonymousUser':
+                return Response({
+                    "status": "error",
+                    "message": "Authentication required"
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            # Get user identifier from authenticated user (could be phone_number or doctor_id)
+            user_identifier = request.user
             
             # Extract doctor information from the JWT token
             doctor_id = None
             doctor_name = None
+            phone_number = None
             
             # Get the token from the Authorization header
             auth_header = request.META.get('HTTP_AUTHORIZATION')
@@ -53,15 +105,28 @@ class ChatSessionView(APIView):
                 try:
                     token = auth_header.split(' ')[1]
                     payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+                    
+                    # Extract doctor information
                     doctor_id = payload.get('doctor_id')
                     doctor_name = payload.get('doctor_name')
-                    logger.info(f"Extracted doctor_id: {doctor_id}, doctor_name: {doctor_name} from JWT token")
+                    
+                    # Extract phone number if available
+                    phone_number = payload.get('phone_number')
+
+                    
+                    # If user_identifier is a doctor_id, use it as phone_number for session creation
+                    if not phone_number and doctor_id and user_identifier == doctor_id:
+                        phone_number = f"{doctor_name}/{doctor_id}"  # Create a unique identifier for doctor sessions
+
+    
+                    
+                    logger.info(f"Extracted doctor_id: {doctor_id}, doctor_name: {doctor_name}, phone_number: {phone_number} from JWT token")
                 except Exception as e:
                     logger.error(f"Error extracting doctor info from token: {e}")
             
             # Create session with doctor information
             session_id = carepay_agent.create_session(doctor_id=doctor_id, doctor_name=doctor_name, phone_number=phone_number)
-            print(f"session_id: {session_id} created_at: {datetime.datetime.now()} by user: {phone_number}")
+            print(f"session_id: {session_id} created_at: {datetime.datetime.now()} by user: {user_identifier}")
             return Response({
                 "status": "success",
                 "session_id": session_id
@@ -84,8 +149,15 @@ class ChatMessageView(APIView):
     
     def post(self, request):
         try:
-            # Get phone number from authenticated user
-            phone_number = request.user
+            # Check if user is authenticated
+            if not request.user or request.user == 'AnonymousUser':
+                return Response({
+                    "status": "error",
+                    "message": "Authentication required"
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            # Get user identifier from authenticated user (could be phone_number or doctor_id)
+            user_identifier = request.user
             
             # Extract data from request
             session_id = request.data.get("session_id")
@@ -99,7 +171,7 @@ class ChatMessageView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
             print(f"session_id: {session_id}")  
             print(f"message: {message}")
-            print(f"user: {phone_number}")
+            print(f"user: {user_identifier}")
             
             # Process message with agent
             response = carepay_agent.run(session_id, message)
@@ -129,6 +201,15 @@ class SessionDetailsView(APIView):
         Get session details by UUID
         """
         try:
+            # Check if user is authenticated
+            if not request.user or request.user == 'AnonymousUser':
+                return Response({
+                    "status": "error",
+                    "message": "Authentication required"
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user_identifier = request.user
+            
             # Convert string UUID to UUID object
             try:
                 session_uuid = UUID(str(session_uuid))  # Ensure we're working with a string first
@@ -156,6 +237,9 @@ class SessionDetailsView(APIView):
                                 'type': 'AIMessage' if isinstance(item, str) else 'HumanMessage',
                                 'content': str(item)
                             })
+
+                # Get userId from data field if it exists
+                user_id = session.data.get('userId') if session.data else None
                 
                 # Return existing session data
                 return Response({
@@ -165,7 +249,8 @@ class SessionDetailsView(APIView):
                     "status": session.status,
                     "created_at": session.created_at,
                     "updated_at": session.updated_at,
-                    "history": history
+                    "history": history,
+                    "userId": user_id
                 })
 
             except ObjectDoesNotExist:

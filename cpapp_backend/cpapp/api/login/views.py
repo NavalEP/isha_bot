@@ -47,9 +47,9 @@ class VerifyOtpView(APIView):
         doctor_id = request.data.get('doctorId')
         doctor_name = request.data.get('doctorName')
         
-        if not phone_number or not otp:
+        if not phone_number or not otp or not doctor_id or not doctor_name:
             return Response(
-                {"error": "Phone number and OTP are required"}, 
+                {"error": "Phone number, OTP, doctor ID, and doctor name are required"}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
             
@@ -76,16 +76,10 @@ class VerifyOtpView(APIView):
         # Generate JWT token
         payload = {
             'phone_number': phone_number,
+            'doctor_id': doctor_id,
+            'doctor_name': doctor_name,
             'exp': datetime.datetime.utcnow() + datetime.timedelta(days=1)
         }
-        
-        # Only add doctor information to the payload if it exists
-        if doctor_id:
-            payload['doctor_id'] = doctor_id
-        
-
-        if doctor_name:
-            payload['doctor_name'] = doctor_name
         
         token = jwt.encode(
             payload, 
@@ -96,15 +90,60 @@ class VerifyOtpView(APIView):
         response_data = {
             "message": "OTP verified successfully",
             "token": token,
-            "phone_number": phone_number
+            "phone_number": phone_number,
+            "doctor_id": doctor_id,
+            "doctor_name": doctor_name
         }
         print(response_data)
         
-        # Only include doctor information in the response if it exists
-        if doctor_id:
-            response_data["doctor_id"] = doctor_id
+        return Response(response_data, status=status.HTTP_200_OK)
+
+
+class DoctorStaffView(APIView):
+    """
+    API view for doctor staff login
+    """
+    def post(self, request):
+        doctor_code = request.data.get('doctor_code')
+        password = request.data.get('password')
         
-        if doctor_name:
-            response_data["doctor_name"] = doctor_name
+        if not doctor_code or not password:
+            return Response(
+                {"error": "Doctor code and password are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        # Initialize the CarePay API client
+        api_client = CarepayAPIClient()
+
+        response = api_client.login_with_password(doctor_code, password)
+        
+        # Check if the request was successful first
+        if response.get('status', 0) >= 400:
+            return Response(
+                {"error": "Invalid doctor code or password"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Access the nested data from the response
+        data = response.get('data', {})
+        doctor_id = data.get('doctorId')
+        doctor_name = data.get('doctorName')
+
+        payload = {
+            'doctor_id': doctor_id,
+            'doctor_name': doctor_name,
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(days=1)
+        }
+
+        token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256') 
+
+        response_data = {
+            "message": "Login successful",
+            "token": token,
+            "doctor_id": doctor_id,
+            "doctor_name": doctor_name
+        }
         
         return Response(response_data, status=status.HTTP_200_OK)
+        

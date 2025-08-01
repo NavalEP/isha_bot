@@ -7,7 +7,7 @@ class SessionData(models.Model):
     Model to store session data with loan inquiry information.
     """
     id = models.AutoField(primary_key=True)
-    phone_number = models.CharField(max_length=10, null=True, blank=True)
+    phone_number = models.CharField(max_length=100, null=True, blank=True)
     application_id = models.UUIDField(default=uuid.uuid4, editable=False)
     session_id = models.UUIDField(default=uuid.uuid4, editable=False)
     data = models.JSONField(null=True, blank=True)
