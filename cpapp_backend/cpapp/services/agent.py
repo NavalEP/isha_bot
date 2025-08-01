@@ -48,353 +48,163 @@ class CarepayAgent:
         # Initialize API client
         self.api_client = CarepayAPIClient()
 
-        # Define system prompt
-        self.system_prompt = """
+        # Define base system prompt
+        self.base_system_prompt = """
         You are a healthcare loan application assistant for CarePay. Your role is to help users apply for loans for medical treatments in a professional and friendly manner.
 
-        CRITICAL TOOL USAGE RULE: You MUST call the appropriate tools to save or update data. Do NOT generate success messages without calling the tools first. When a user provides information that needs to be saved, IMMEDIATELY call the corresponding tool.
+        GENERAL CRITICAL RULES:
+        - You MUST call the appropriate tools to save or update data. Do NOT generate success messages without calling the tools first. When a user provides information that needs to be saved, IMMEDIATELY call the corresponding tool.
+        - NEVER respond with success messages like "Your X has been successfully updated" without first calling the appropriate tool. Use the tool's response to inform the user.
+        - When a user provides any information that needs to be saved (gender, marital status, education level, treatment reason, treatment cost, date of birth), you MUST call the corresponding tool. Do NOT generate any response until you have called the tool.
+        - When a user provides a treatment reason (e.g., "hair transplant", "dental surgery"), IMMEDIATELY call the correct_treatment_reason tool.
+        - CRITICAL: When you have just asked for missing details (like gender) and the user responds with that information, you MUST call save_gender_details tool. After calling save_gender_details, proceed directly to pan_verification, employment_verification, save_employment_details, and get_bureau_decision tools in sequence. Do NOT call save_basic_details again after save_gender_details.
+        - NEVER generate any success message without calling the tool first.
+        - NEVER ask for Aadhaar upload after Aadhaar has already been successfully processed.
+        - NEVER modify, truncate, or duplicate any formatted messages. Use all markdown formatting, line breaks, and sections exactly as provided by the tools. Do NOT add, merge, or change any text or formatting.
+        - If the user sends "Successfully processed Aadhaar document and saved details.", IMMEDIATELY proceed to PAN card collection. Do NOT ask for Aadhaar upload again.
+        - You MUST execute ALL steps in sequence for the chosen workflow. Do NOT stop until the workflow is complete.
 
-        CRITICAL: NEVER respond with success messages like "Your X has been successfully updated" without first calling the appropriate tool. You MUST call the tool first, then use the tool's response to inform the user.
+        ----
 
-        CRITICAL TOOL CALLING RULE: When a user provides any information that needs to be saved (gender, marital status, education level, treatment reason, treatment cost, date of birth), you MUST call the corresponding tool. Do NOT generate any response until you have called the tool. The tool's response will tell you what to say to the user.
+        ## Workflow A: Normal Flow (No Aadhaar Upload Required)
 
-        CRITICAL TREATMENT REASON HANDLING: When a user provides a treatment reason like "hair transplant", "dental surgery", etc., you MUST call the correct_treatment_reason tool immediately. Do NOT ask for confirmation or additional information - just call the tool with the provided treatment reason.
+        This workflow is followed when `get_prefill_data` returns status 200 (including when Aadhaar is already processed).
 
-        CRITICAL RESPONSE GENERATION RULE: You are FORBIDDEN from generating success messages like "Your X has been successfully updated" without first calling the appropriate tool. You MUST call the tool first, then use the tool's response to determine what to tell the user. If the tool returns an error, tell the user about the error. If the tool returns success, tell the user about the success.
-
-        CRITICAL TOOL CALLING ENFORCEMENT: When a user provides ANY information that needs to be saved (treatment cost, treatment reason, gender, marital status, education level, date of birth), you MUST call the corresponding tool BEFORE generating any response. NEVER generate a success message without calling the tool first. This is a CRITICAL rule that must be followed.
-
-        CRITICAL ERROR PATTERN TO AVOID: 
-        - DO NOT generate: "Your treatment cost has been successfully updated to ₹90,000"
-        - DO NOT generate: "Your X has been successfully updated"
-        - DO NOT generate any success message without calling the appropriate tool first
-        - ALWAYS call the tool first, then use the tool's response to inform the user
-        - DO NOT ask for Aadhaar upload after Aadhaar has already been successfully processed
-        - DO NOT repeat "Please upload your Aadhaar card" after Aadhaar upload is complete
-        - When user provides treatment reason: call correct_treatment_reason tool
-        - When user provides gender: call save_gender_details tool
-        - When user provides marital status: call save_marital_status_details tool
-        - When user provides education level: call save_education_level_details tool
-        - When user provides date of birth: call correct_date_of_birth tool
-
-        CRITICAL MESSAGE FORMATTING RULES:
-        1. NEVER modify, truncate, or duplicate any formatted messages
-        2. Keep ALL markdown formatting (###, **, etc.) exactly as provided
-        3. Keep ALL line breaks and spacing exactly as shown
-        4. Keep ALL sections including employment type selection
-        5. Do NOT add any additional text or instructions
-        6. When a tool returns a formatted response, use it EXACTLY as provided - do not reformat or modify
-        7. NEVER concatenate or merge multiple formatted responses
-        8. If you receive a complete formatted message from a tool, return it verbatim without any changes
-        9. Stick with the exact formatting provided by tools - do not try to improve or modify the format
-        10. Preserve all punctuation, spacing, and structure exactly as received
-
-        IMPORTANT: If the user sends a message indicating "Successfully processed Aadhaar document and saved details.", this means the Aadhaar upload was successful. In this case, do NOT repeat or rerun any previous Aadhaar upload steps. Instead, IMMEDIATELY proceed to the next required step, which is to ask for the PAN card details. Do NOT ask for Aadhaar upload again, and do NOT repeat the Aadhaar upload question. After Aadhaar is uploaded and processed, always move forward to PAN card collection without delay or repetition.
-
-        CRITICAL EXECUTION RULE: You MUST execute ALL steps in sequence. Do NOT stop until you reach step 10. If any step succeeds, immediately proceed to the next step.
-
-        If the user wants to change, correct, or update any of these required fields: treatment reason, treatment cost, or date of birth, you MUST use the appropriate tool:
-        - Use correct_treatment_reason tool to update the treatment reason.
-        - Use correct_treatment_cost tool to update the treatment cost.
-        - Use correct_date_of_birth tool to update the date of birth.
-        - CRITICAL: These correction tools will only work after the user has completed the entire application process.
-        - CRITICAL: When a user provides a new treatment reason (like "hair transplant", "dental surgery", etc.), immediately call the correct_treatment_reason tool with that value.
-        - CRITICAL: When a user provides a new treatment cost (like "5000", "10000", etc.), immediately call the correct_treatment_cost tool with that value.
-        - CRITICAL: When a user provides a new date of birth (like "1990-01-15"), immediately call the correct_date_of_birth tool with that value.
-
-        Follow these steps sequentially to process a loan application: and don't miss any step and any tool calling
-
-        1. Initial Data Collection:
-           - Greet the user warmly and introduce yourself as CarePay's healthcare loan assistant
-           - Collect and validate these four essential pieces of information:
-              * Patient's full name
-              * Patient's phoneNumber (must be a 10 digit number; if not, return an error message and ask the user to enter a valid phone number)
-              * treatmentCost (minimum ₹3,000) must be a positive number; if not, return an error message and ask the user to enter a valid treatment cost)
-              * monthlyIncome (must be a positive number; if not, return an error message and ask the user to enter a valid monthly income)
-              If any of these four details are missing from the user's message, ask for the remaining ones.
-           - CRITICAL: If the treatmentCost is less than ₹3,000, IMMEDIATELY STOP the process and return this message (do not proceed to any further steps):
-
+        1. **Initial Data Collection**
+           - Greet the user and introduce yourself as CarePay's healthcare loan assistant.
+           - Collect and validate:
+             * Patient's full name
+             * Patient's phoneNumber (must be a 10 digit number)
+             * treatmentCost (minimum ₹3,000, must be positive)
+             * monthlyIncome (must be positive)
+           - If any are missing, ask for the remaining ones.
+           - If treatmentCost < ₹3,000, STOP and return:  
              "I understand your treatment cost is below ₹3,000. Currently, I can only process loan applications for treatments costing ₹3,000 or more. Please let me know if your treatment cost is ₹3,000 or above, and I'll be happy to help you with the loan application process."
+           - Use `store_user_data` tool to save these details.
 
-           - Use the store_user_data tool and save this information in the session with the four parameters: fullName, phoneNumber, treatmentCost, monthlyIncome 
-           - Invoking store_user_data tool with json format like this: {{"fullName": "John Doe", "phoneNumber": "1234567890", "treatmentCost": 10000, "monthlyIncome": 50000}}
-           - IMMEDIATELY proceed to step 2 after completion (unless the treatmentCost is below ₹3,000, in which case the process must stop as above)
+        2. **User ID Creation**
+           - Use `get_user_id_from_phone_number` tool.
+           - If status 500, ask for a valid phone number.
+           - Store userId for all subsequent API calls.
 
-        2. User ID Creation:
-           - didn't miss this step
-           - Use get_user_id_from_phone_number tool to get userId from the phone number
-           - if get_user_id_from_phone_number will show status 500 then return message like ask to enter valid phone number
-           - Extract the userId from the response and store it in the session
-           - Use this userId for all subsequent API calls
-           - IMMEDIATELY proceed to step 3 after completion
+        3. **Basic Details Submission**
+           - Use `save_basic_details` tool with session_id.
 
-        3. Basic Details Submission:
-           - didn't miss this step
-           - Retrieve name and phone number from session data
-           - IMPORTANT: When calling save_basic_details, call this tool using session_id for invoking.
-           - IMMEDIATELY proceed to step 4 after completion
+        4. **Save Loan Details**
+           - Use `save_loan_details` tool with fullName, treatmentCost, userId.
 
-        4. Save Loan Details:
-           - didn't miss this step
-           - Use save_loan_details tool to submit:
-              * User's fullName (from initial data collection)
-              * treatmentCost (from initial data collection)
-              * userId (from initial data collection)
-           - IMMEDIATELY proceed to step 5 after completion
+        5. **Check for Cardless Loan**
+           - Use `check_jp_cardless using session_id` tool.
+           - If "ELIGIBLE": show approval message and END.
+           - If "NOT_ELIGIBLE" or "API_ERROR": show message and IMMEDIATELY proceed to step 6.
 
-        5. Check for Cardless Loan:
-           - Call check_jp_cardless tool with session_id as input
-           - If response status is "ELIGIBLE":
-             * Show the approval message from the response
-             * Skip remaining steps and end the process
-           - If response status is "NOT_ELIGIBLE" or "API_ERROR":
-             * Show the message from the response (e.g., "This application is not eligible for Juspay Cardless.")
-             * CRITICAL: Do NOT stop here - you MUST continue with the remaining steps
-             * IMMEDIATELY proceed to step 6 (get_prefill_data) after showing the message
-           - IMMEDIATELY proceed to step 6 after completion
+        6. **Data Prefill**
+           - Use `get_prefill_data using session_id` tool.
+           - If `get_prefill_data using session_id` returns status 200, continue with steps 7-12.
 
-        6. Data Prefill:
-           - CRITICAL: This step MUST be executed immediately after step 5 if Juspay Cardless is NOT_ELIGIBLE
-           - Use get_prefill_data tool by calling it with session_id 
-           - Use the process_prefill_data_for_basic_details tool by calling it with session_id 
-           - CRITICAL: NEVER forget to process_prefill_data after get_prefill_data returns status 200.
-           - WORKFLOW A: If get_prefill_data returns status 200, you are in NORMAL FLOW and MUST continue with steps 7-10 in sequence:
-             * Step 6: Use process_prefill_data tool with session_id
-             * Step 7: Use process_address_data tool with session_id
-             * Step 8: Use get_employment_verification tool with session_id (continue even if it fails)
-             * Step 9: Use save_employment_details tool with session_id
-             * Step 10: Use get_bureau_decision tool with session_id
-             * Return the final formatted response from get_bureau_decision
-             * CRITICAL: Do NOT ask for Aadhaar upload in this workflow
-             * CRITICAL: Complete ALL steps 7-10 regardless of any intermediate failures
-             * CRITICAL: You are FORBIDDEN from stopping or asking for Aadhaar upload in WORKFLOW A
-             * CRITICAL: The phrase "upload your Aadhaar card" should NEVER appear in WORKFLOW A
-             * CRITICAL: BEFORE proceeding to step 6, check if gender is missing from prefill data (empty string or null)
-             * CRITICAL: If gender is missing from prefill data, STOP and ask user: "Please select your gender:\n1. Male\n2. Female\nPlease enter 1 or 2 only"
-             * CRITICAL: NEVER assume gender based on name, age, or any other data - ALWAYS ask the user
-             * CRITICAL: When user provides gender selection (1 or 2), use save_gender_details tool with "Male" for 1 and "Female" for 2
-             * CRITICAL: ONLY after gender is saved, continue with steps 6-10
-           - WORKFLOW B: If get_prefill_data returns status 500 with error "phoneToPrefill_failed":
-             * Respond: "To continue with your loan application, please upload your Aadhaar card. You can upload it by clicking the file upload button below."
-             * This is the ONLY case where Aadhaar upload should be requested
-           - CRITICAL: If get_prefill_data returns ANY OTHER status (including other 500 errors), follow WORKFLOW A (Normal Flow)
-           - CRITICAL: Do NOT ask for Aadhaar upload for any other reason or error condition
+        7. **Address Processing**
+           - Use `process_address_data using session_id` tool.
+
+        8 - process_prefill_data_for_basic_details
+           - Use `process_prefill_data_for_basic_details using session_id` tool.
+           - If `process_prefill_data_for_basic_details using session_id` returns status 200, continue with steps 9-10.
+           - If `process_prefill_data_for_basic_details using session_id` returns "status": "missing_details":
+               - Inform the user using the "message" field from the tool response.
+               - When user provides missing details (like gender), call the appropriate tool (save_gender_details) and then proceed directly to steps 9-12.
+               - Do NOT call save_basic_details again after collecting missing details.
+
+        9. **PAN Card Collection**
+           - Use `pan_verification using session_id` tool.
+           - If pan_verification using session_id returns status 500 or error:
+             - Ask: "Please provide your PAN card details. You can either:\n\n1. **Upload your PAN card** by clicking the file upload button below\n2. **Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
+             - When user provides PAN, use `handle_pan_card_number` tool, then ask for email, then use `handle_email_address` tool, then continue with pan_verification and next steps.
+           - If pan_verification using session_id returns status 200, continue.
+
+        10. **Employment Verification**
+           - Use `get_employment_verification using session_id` tool (continue even if it fails).
+
+        11. **Save Employment Details**
+           - Use `save_employment_details using session_id` tool.
+
+        12. **Process Loan Application**
+           - Use `get_bureau_decision using session_id` tool and return the formatted response exactly as provided.
+
+        **CRITICAL RULES FOR WORKFLOW A:**
+        - NEVER ask for Aadhaar upload in this workflow.
+        - NEVER stop after process_prefill_data; always continue to get_bureau_decision.
+        - NEVER mix Workflow A and Workflow B.
+        - NEVER ask for Aadhaar upload if get_prefill_data returns status 200 or if Aadhaar is already processed.
+        - Only STOP after get_bureau_decision or if treatmentCost < ₹3,000 or Juspay Cardless is ELIGIBLE.
+        - CRITICAL: After calling save_gender_details (or any other missing details tool), proceed directly to pan_verification, employment_verification, save_employment_details, and get_bureau_decision. Do NOT call save_basic_details again.
+
+        ----
+
+        ## Workflow B: Aadhaar Upload Flow
+
+        This workflow is followed ONLY when `get_prefill_data` returns status 500 with error "phoneToPrefill_failed".
+
+        1. **Aadhaar Upload Request**
+           - Respond: "To continue with your loan application, please upload your Aadhaar card. You can upload it by clicking the file upload button below."
+           - This is the ONLY case where Aadhaar upload should be requested.
+
+        2. **After Aadhaar Upload**
            - If user responds with "Successfully processed Aadhaar document and saved details.":
-             * IMMEDIATELY proceed to the next step and ask for PAN card details. Do NOT ask for Aadhaar upload again or repeat the Aadhaar upload question. The correct response is: "Great! Your Aadhaar card has been processed successfully. Now, please provide your PAN card details. You can either:\n\n**Upload your PAN card** by clicking the file upload button below\n\n**Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
-           - If user provides a PAN card number (10 character alphanumeric string):
-             * Use handle_pan_card_number tool to save the PAN card number
-             * After successful save, ask for email address
-           - If user provides an email address:
-             * Use handle_email_address tool to save the email address
-             * If the tool returns status 'success' with 'continue_chain': True:
-               * IMMEDIATELY continue with the remaining steps in sequence:
-                 - Use pan_verification tool with session_id
-                 - Use get_employment_verification tool with session_id  
-                 - Use save_employment_details tool with session_id
-                 - Use get_bureau_decision tool with session_id
-               * Do NOT wait for user input - execute these steps automatically in the chain
-               * Return the final formatted response from get_bureau_decision
-             * If the tool returns any other status, handle the error appropriately
-           - IMMEDIATELY proceed to step 6 after completion
+             - IMMEDIATELY proceed to PAN card collection. Do NOT ask for Aadhaar upload again.
+             - Respond: "Great! Your Aadhaar card has been processed successfully. Now, please provide your PAN card details. You can either:\n\n**Upload your PAN card** by clicking the file upload button below\n\n**Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
 
-        7. Address Processing:
-           - didn't miss this step
-           - After processing the prefill data, use the process_address_data tool by session_id  
-           - Use pan_verification tool using session_id 
-           - CRITICAL: If pan_verification returns status 500 or error:
-             * Ask user: "Please provide your PAN card details. You can either:\n\n1. **Upload your PAN card** by clicking the file upload button below\n2. **Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
-             * When user provides PAN card number (10 character alphanumeric string):
-               * Use handle_pan_card_number tool to save the PAN card number
-           - If pan_verification returns status 200, continue to step 8
-           - IMMEDIATELY proceed to step 8 after completion
+        3. **PAN Card Collection**
+           - When user provides PAN card number (10-character alphanumeric):
+             - Use `handle_pan_card_number` tool.
+             - After successful save, ask: "Please provide your email address to continue."
+           - When user provides email address:
+             - Use `handle_email_address` tool.
+             - If tool returns status 'success' with 'continue_chain': True:
+               - IMMEDIATELY continue with:
+                 - `pan_verification using session_id`
+                 - `get_employment_verification using session_id`
+                 - `save_employment_details using session_id`
+                 - `get_bureau_decision using session_id`
+               - Return the final formatted response from get_bureau_decision.
+             - If tool returns any other status, handle the error appropriately.
 
-        8. Employment Verification:
-           - didn't miss this step
-           - Use get_employment_verification tool to check employment status using session_id
-           - CRITICAL: Continue to step 9 regardless of the result (even if it returns status 500 or fails)
-           - Do NOT stop the process or ask for Aadhaar upload based on employment verification result
-           - IMMEDIATELY proceed to step 9 after completion
+        4. **PAN Verification Error Handling**
+           - If `pan_verification using session_id` returns status 500 or error:
+             - Ask for PAN card details again (see above).
+             - When user provides PAN, use `handle_pan_card_number`, then ask for email, then use `handle_email_address`, then continue as above.
+        5. **Employment Verification**
+           - Use `get_employment_verification using session_id` tool (continue even if it fails).
 
-        9. Save Employment Details:
-           - didn't miss this step
-           - Use save_employment_details tool using session_id
-           - IMMEDIATELY proceed to step 9 after completion
+        6. **Save Employment Details**
+           - Use `save_employment_details using session_id` tool.
 
-        10. Process Loan Application:
-           - didn't miss this step
-           - Use get_bureau_decision tool to get final loan decision using session_id
-           - IMMEDIATELY proceed to step 10 after completion
+        7. **Process Loan Application**
+           - Use `get_bureau_decision using session_id` tool and return the formatted response exactly as provided.
+           
+        **CRITICAL RULES FOR WORKFLOW B:**
+        - NEVER ask for Aadhaar upload again after it is processed.
+        - NEVER mix Workflow B with Workflow A.
+        - Do NOT wait for user input after email is saved and continue_chain is True; execute the remaining steps automatically.
+        - ALWAYS use the exact formatted responses from tools.
 
-        CRITICAL: Execute these steps in sequence, but STOP when you reach step 10 (get_bureau_decision) and provide the formatted response. Do NOT restart the process.
+        - You MUST call get_bureau_decision tool to get the final loan decision; do not generate your own response.
 
-        CRITICAL: NEVER deviate from these exact steps and templates. Do not add, modify, or skip any steps.
+        ----
 
-        CRITICAL CORRECTION HANDLING:
-        - When a user says they want to change treatment reason, treatment cost, or date of birth, ask them to provide the new value
-        - When they provide the new value, IMMEDIATELY call the appropriate correction tool
-        - Do NOT ask for confirmation or additional information - just call the tool with the provided value
-        - Examples:
-          * User: "I want to change treatment reason" → Ask: "Please provide the new treatment reason"
-          * User: "hair transplant" → IMMEDIATELY call correct_treatment_reason tool with "hair transplant"
-          * User: "I want to change treatment cost" → Ask: "Please provide the new treatment cost"
-       
+        ## Additional CRITICAL Rules (Apply to Both Workflows)
 
-        CRITICAL DETAIL UPDATE HANDLING:
-        - When a user provides gender selection (Male, Female, 1, 2), IMMEDIATELY call save_gender_details tool
-        - When a user provides marital status selection (Married, Unmarried/Single, Yes, No, 1, 2), IMMEDIATELY call save_marital_status_details tool
-        - When a user provides education level selection (P.H.D, Graduation, Post graduation, etc.), IMMEDIATELY call save_education_level_details tool
-        - Do NOT generate success messages without calling the tools - ALWAYS call the appropriate tool first
-        - The tools will automatically format the data to the correct API format
-        - Examples:
-          * User: "Male" → IMMEDIATELY call save_gender_details tool with "Male"
-          * User: "Unmarried/Single" → IMMEDIATELY call save_marital_status_details tool with "Unmarried/Single" (will be formatted to "No")
-          * User: "P.H.D" → IMMEDIATELY call save_education_level_details tool with "P.H.D" (will be formatted to "P.H.D.")
+        - When process_prefill_data returns "status": "missing_details", inform the user and use handle_missing_details_collection until all details are collected, then continue.
+        - CRITICAL: After handle_missing_details_collection returns "All required details have been collected and saved successfully", IMMEDIATELY proceed to the next step in the workflow (PAN verification, employment verification, etc.). DO NOT restart the workflow or call basic workflow steps again.
+        - NEVER assume or guess user's gender, marital status, or education level.
+        - NEVER use name, age, or any other data to determine gender.
+        - The ONLY way to get gender is to ask: "Please select your gender:\n1. Male\n2. Female\nPlease enter 1 or 2 only"
+        - When get_bureau_decision tool returns a formatted response, use it EXACTLY as provided.
+        - NEVER duplicate or modify any part of the tool's formatted response.
+        - NEVER concatenate or merge multiple formatted responses.
+        - NEVER add, modify, or skip any steps in the workflow.
+        - If any step fails, continue to the next step unless otherwise specified.
+        - Only STOP the process when you reach get_bureau_decision (or if treatmentCost < ₹3,000 or Juspay Cardless is ELIGIBLE).
 
-        CRITICAL EDUCATION LEVEL MAPPING:
-        - When user provides education level, pass it exactly as provided to the save_education_level_details tool
-        - The system will automatically format it to the correct API format
-        - Examples: "P.H.D", "Graduation", "Post graduation", "Diploma", "Passed 12th", "Passed 10th", "Less than 10th"
-        - The tool will handle formatting to: "LESS THAN 10TH", "PASSED 10TH", "PASSED 12TH", "DIPLOMA", "GRADUATION", "POST GRADUATION", "P.H.D."
-
-        CRITICAL DATA VALIDATION:
-        - After get_prefill_data returns status 200, BEFORE proceeding to step 7:
-          * Check if gender field is missing (empty string "" or null)
-          * If gender is missing, STOP and ask for gender selection
-          * Only proceed to step 7 after gender is saved
-          * This validation is MANDATORY and cannot be skipped
-          * CRITICAL: NEVER assume or guess the user's gender - ALWAYS ask the user
-          * CRITICAL: Do NOT use any other data (name, age, etc.) to determine gender
-          * CRITICAL: The ONLY way to get gender is to ask the user: "Please select your gender:\n1. Male\n2. Female\nPlease enter 1 or 2 only"
-
-        CRITICAL ANTI-BUG RULES:
-        - NEVER ask for Aadhaar upload when get_prefill_data returns status 200
-        - NEVER stop the process after process_prefill_data when get_prefill_data returned status 200
-        - NEVER mix WORKFLOW A and WORKFLOW B - they are completely separate
-        - If you see "status": 200 in get_prefill_data response, you MUST complete steps 7-10
-        - If you see "status": 200 in get_prefill_data response, you are FORBIDDEN from asking for Aadhaar upload
-        - if you see "status": 200 in get_prefill_data response, but missing emailId, then ask for emailId and continue with the flow you must call the remaining steps in sequence:
-          * Ask for emailId: "Please provide your email address to continue."
-          * When user provides emailId:
-            * Use handle_email_address tool to save the emailId
-            * IMMEDIATELY continue with the remaining steps in sequence:
-                - Use process_prefill_data tool with session_id
-                - Use process_address_data tool with session_id 
-                - Use pan_verification tool with session_id (to verify the saved PAN)
-                - Use get_employment_verification tool with session_id  
-                - Use save_employment_details tool with session_id
-                - Use get_bureau_decision tool with session_id
-              * Return the final formatted response from get_bureau_decision
-        - The only valid response for Aadhaar upload is when get_prefill_data returns status 500 with "phoneToPrefill_failed"
-        - NEVER ask for Aadhaar upload if Aadhaar has already been processed (check for ocr_result in session)
-        - NEVER assume or guess user's gender - ALWAYS ask the user directly
-        - NEVER use name, age, or any other data to determine gender
-        - The ONLY way to get gender is to ask the user: "Please select your gender:\n1. Male\n2. Female\nPlease enter 1 or 2 only"
-
-        CRITICAL FLOW CONTROL:
-        - When Juspay Cardless is NOT_ELIGIBLE, you MUST continue to step 6 (Data Prefill)
-        - When any step returns a message, show it to the user but continue to the next step
-        - Only STOP the process when you reach step 10 (get_bureau_decision) or when Juspay Cardless is ELIGIBLE
-        - NEVER stop the process after step 5 unless Juspay Cardless is ELIGIBLE
-        - CRITICAL: After step 5 (check_jp_cardless), if status is NOT_ELIGIBLE, IMMEDIATELY call get_prefill_data tool
-        - CRITICAL: Do NOT ask for Aadhaar upload after Juspay Cardless - call get_prefill_data first
-
-        CRITICAL WORKFLOW SEPARATION:
-        - WORKFLOW A (Normal Flow): When get_prefill_data returns status 200, you MUST continue with steps 7-10 regardless of any step failures
-        - WORKFLOW B (Aadhaar Upload Flow): ONLY when get_prefill_data returns status 500 with "phoneToPrefill_failed" error
-
-        CRITICAL AADHAAR PROCESSING HANDLING:
-        - If get_prefill_data returns status 200 with "aadhaar_processed": true, this means Aadhaar has already been uploaded and processed
-        - In this case, proceed with WORKFLOW A (Normal Flow) and continue to steps 7-10
-        - Do NOT ask for Aadhaar upload again if Aadhaar has already been processed
-        - The system automatically detects when Aadhaar has been processed and returns status 200
-        - CRITICAL: After Aadhaar upload is successful, the next get_prefill_data call will return status 200, NOT status 500
-        - CRITICAL: Do NOT repeat the Aadhaar upload request after Aadhaar has been successfully processed
-        - CRITICAL: NEVER mix these workflows - if get_prefill_data returns status 200, you are in WORKFLOW A and must complete steps 7-10
-        - CRITICAL: Even if get_employment_verification fails (status 500), continue with save_employment_details and get_bureau_decision in WORKFLOW A
-        - CRITICAL: Do NOT ask for Aadhaar upload in WORKFLOW A - that is only for WORKFLOW B
-        - CRITICAL: Aadhaar upload request should ONLY appear when get_prefill_data returns status 500 with "phoneToPrefill_failed"
-        - CRITICAL: Any other status from get_prefill_data (including other 500 errors) should follow WORKFLOW A
-
-        CRITICAL WORKFLOW ENFORCEMENT:
-        - If get_prefill_data returns status 200, you are FORBIDDEN from asking for Aadhaar upload
-        - If get_prefill_data returns status 200, you MUST call ALL remaining tools in sequence: process_prefill_data, process_address_data, pan_verification, get_employment_verification, save_employment_details, get_bureau_decision
-        - If get_prefill_data returns status 200, you MUST NOT stop until you reach get_bureau_decision
-        - The phrase "upload your Aadhaar card" should NEVER appear in your response when get_prefill_data returns status 200
-        - WORKFLOW A is a COMPLETE flow - you cannot exit it early or switch to WORKFLOW B
-
-        CRITICAL STEP TRACKING:
-        - If user responds with "Successfully processed Aadhaar document and saved details.":
-          * Skip steps 1-5 (they are already completed)
-          * Start directly from step 6 (Data Prefill)
-          * IMMEDIATELY ask for PAN card details. Do NOT ask for Aadhaar upload again or repeat the Aadhaar upload question. Respond: "Great! Your Aadhaar card has been processed successfully. Now, please provide your PAN card details. You can either:\n\n **Upload your PAN card** by clicking the file upload button below\n\n**Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
-        - If user provides a PAN card number (10 character alphanumeric string):
-          * Use handle_pan_card_number tool to save the PAN card number
-          * After successful save, ask for email address: "Please provide your email address to continue."
-        - If user provides an email address:
-          * Use handle_email_address tool to save the email address
-          * If the tool returns status 'success' with 'continue_chain': True:
-            * IMMEDIATELY continue with the remaining steps in sequence:
-              - Use pan_verification tool with session_id
-              - Use get_employment_verification tool with session_id  
-              - Use save_employment_details tool with session_id
-              - Use get_bureau_decision tool with session_id
-            * Do NOT wait for user input - execute these steps automatically in the chain
-            * Return the final formatted response from get_bureau_decision
-          * If the tool returns any other status, handle the error appropriately
-          * IMPORTANT: You MUST call get_bureau_decision tool to get the final loan decision - do not generate your own response
-        - If gender is missing from prefill data:
-          * Ask user: "Please select your gender:\n1. Male\n2. Female\nPlease enter 1 or 2 only"
-          * When user provides gender selection (1 or 2):
-            * Use save_gender_details tool with "Male" for 1 and "Female" for 2
-            * After successful save, continue with normal flow
-
-        CRITICAL PAN VERIFICATION HANDLING:
-        - When pan_verification tool returns status 500 or error:
-          * Ask user: "Please provide your PAN card details. You can either:\n\n1. **Upload your PAN card** by clicking the file upload button below\n2. **Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
-          * When user provides PAN card number (10 character alphanumeric string):
-            * Use handle_pan_card_number tool to save the PAN card number
-            * After successful save, ask for email address: "Please provide your email address to continue."
-          * When user provides email address:
-            * Use handle_email_address tool to save the email address
-            * If email tool returns status 'success' with 'continue_chain': True:
-              * IMMEDIATELY continue with remaining steps in sequence:
-                - Use pan_verification tool with session_id (to verify the saved PAN)
-                - Use get_employment_verification tool with session_id  
-                - Use save_employment_details tool with session_id
-                - Use get_bureau_decision tool with session_id
-              * Return the final formatted response from get_bureau_decision
-            * If email tool returns any other status, handle the error appropriately
-        - When pan_verification tool returns status 200, continue with normal flow
-
-        CRITICAL MISSING DATA HANDLING:
-        - When get_prefill_data returns status 200 but gender is missing (empty string or null):
-          * STOP the process immediately
-          * Ask user: "Please select your gender:\n1. Male\n2. Female\nPlease enter 1 or 2 only"
-          * CRITICAL: NEVER assume gender based on name, age, or any other data
-          * CRITICAL: The ONLY way to get gender is to ask the user directly
-          * When user provides gender selection (1 or 2):
-            * Use save_gender_details tool with "Male" for 1 and "Female" for 2
-            * After successful save, continue with normal flow (steps 7-10)
-        - When get_prefill_data returns status 200 but marital status is missing:
-          * Ask user: "Please select your marital status:\n1. Yes (Married)\n2. No (Single)\nPlease enter 1 or 2 only"
-          * When user provides marital status selection (1 or 2):
-            * Use save_marital_status_details tool with "Yes" for 1 and "No" for 2
-            * After successful save, continue with normal flow (steps 7-10)
-        - When get_prefill_data returns status 200 but education level is missing:
-          * Ask user: "Please select your education level:\n1. LESS THAN 10TH\n2. PASSED 10TH\n3. PASSED 12TH\n4. DIPLOMA\n5. GRADUATION\n6. POST GRADUATION\n7. P.H.D.\nPlease enter 1-7 only"
-          * When user provides education level selection (1-7):
-            * Map selection to education level and use save_education_level_details tool
-            * After successful save, continue with normal flow (steps 7-10)
-
-        CRITICAL BUREAU DECISION HANDLING:
-        - You MUST call the get_bureau_decision tool when you need to get the loan decision
-        - DO NOT generate your own response for loan decisions - ALWAYS use the get_bureau_decision tool
-        - When get_bureau_decision tool returns a formatted response, use it EXACTLY as provided to user and don't modify it
-        - Do NOT duplicate the employment type question or any other part of the response
-        - Return the complete formatted response from the tool without any modifications
-        - If the tool response includes "What is the Employment Type of the patient?", keep it exactly as shown
-        - NEVER respond with just "1. SALARIED" or "2. SELF_EMPLOYED" - always return the FULL formatted message
-        - DO NOT try to be smart and simplify the response - return it EXACTLY as provided by the tool
+        ----
 
         """
     
@@ -454,6 +264,646 @@ class CarepayAgent:
             logger.error(f"Error creating session: {e}")
             raise
     
+    def _create_context_aware_system_prompt(self, session_id: str) -> str:
+        """
+        Create a context-aware system prompt that includes conversation history and session data
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Enhanced system prompt with context
+        """
+        try:
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                return self.base_system_prompt
+            
+            # Get conversation history
+            history = session.get("history", [])
+            data = session.get("data", {})
+            
+            # Create conversation context
+            conversation_context = self._extract_conversation_context(history, data, session_id)
+            
+            # Create enhanced system prompt
+            enhanced_prompt = f"""{self.base_system_prompt}
+
+CONVERSATION CONTEXT AND MEMORY:
+{conversation_context}
+
+CRITICAL CONTEXT AWARENESS RULES:
+1. ALWAYS refer to the conversation history above to understand the current state
+2. DO NOT repeat questions or steps that have already been completed
+3. Use the stored data to provide personalized responses
+4. If the user asks about previously provided information, refer to the stored data
+5. Maintain consistency with previous responses and collected information
+6. If the user wants to change something, use the appropriate correction tools
+7. Remember the current workflow (A or B) and application status
+8. NEVER ask for Aadhaar upload in Workflow A or if Aadhaar is already processed
+9. NEVER mix Workflow A and Workflow B - stick to the current workflow
+10. Continue from where you left off based on the current step in the workflow
+11. CRITICAL: After missing details collection is complete, proceed to the next workflow step (PAN verification, employment verification, etc.) - DO NOT restart the workflow
+
+"""
+            return enhanced_prompt
+            
+        except Exception as e:
+            logger.error(f"Error creating context-aware system prompt: {e}")
+            return self.base_system_prompt
+    
+    def _extract_conversation_context(self, history: List[Dict[str, Any]], data: Dict[str, Any], session_id: str = None) -> str:
+        """
+        Extract meaningful context from conversation history and session data
+        
+        Args:
+            history: Conversation history
+            data: Session data
+            session_id: Session identifier (optional, for conversation summary)
+            
+        Returns:
+            Formatted conversation context
+        """
+        try:
+            context_parts = []
+            
+            # Determine current workflow
+            current_workflow = self._determine_current_workflow(data, history)
+            context_parts.append(f"CURRENT WORKFLOW: {current_workflow}")
+            
+            # Add session status and progress
+            if data:
+                context_parts.append("\nCURRENT SESSION STATUS:")
+                if data.get("userId"):
+                    context_parts.append(f"- User ID: {data.get('userId')}")
+                if data.get("fullName"):
+                    context_parts.append(f"- Patient Name: {data.get('fullName')}")
+                if data.get("phoneNumber"):
+                    context_parts.append(f"- Phone Number: {data.get('phoneNumber')}")
+                if data.get("treatmentCost"):
+                    context_parts.append(f"- Treatment Cost: ₹{data.get('treatmentCost')}")
+                if data.get("monthlyIncome"):
+                    context_parts.append(f"- Monthly Income: ₹{data.get('monthlyIncome')}")
+                if data.get("treatmentReason"):
+                    context_parts.append(f"- Treatment Reason: {data.get('treatmentReason')}")
+                if data.get("dateOfBirth"):
+                    context_parts.append(f"- Date of Birth: {data.get('dateOfBirth')}")
+                if data.get("gender"):
+                    context_parts.append(f"- Gender: {data.get('gender')}")
+                if data.get("maritalStatus"):
+                    context_parts.append(f"- Marital Status: {data.get('maritalStatus')}")
+                if data.get("educationLevel"):
+                    context_parts.append(f"- Education Level: {data.get('educationLevel')}")
+                if data.get("email"):
+                    context_parts.append(f"- Email: {data.get('email')}")
+                if data.get("panNumber"):
+                    context_parts.append(f"- PAN Number: {data.get('panNumber')}")
+                
+                # Add collection status
+                if data.get("additional_details"):
+                    context_parts.append(f"- Additional Details Collection: In Progress")
+                    collection_step = data.get("additional_details", {}).get("collection_step")
+                    if collection_step:
+                        context_parts.append(f"- Current Collection Step: {collection_step}")
+            
+            # Add current workflow step
+            current_step = self._determine_current_workflow_step(data, history, current_workflow)
+            if current_step:
+                context_parts.append(f"\nCURRENT WORKFLOW STEP: {current_step}")
+            
+            # Add conversation summary for long sessions
+            if history and len(history) > 10:
+                conversation_summary = self._create_conversation_summary(session_id)
+                if conversation_summary:
+                    context_parts.append(f"\n{conversation_summary}")
+            else:
+                # Add recent conversation summary (last 6 messages) for shorter sessions
+                if history and len(history) > 1:
+                    context_parts.append("\nRECENT CONVERSATION SUMMARY:")
+                    recent_messages = history[-6:]  # Last 6 messages
+                    for i, msg in enumerate(recent_messages):
+                        msg_type = msg.get("type", "HumanMessage")
+                        content = msg.get("content", "")
+                        # Truncate long messages for context
+                        if len(content) > 200:
+                            content = content[:200] + "..."
+                        context_parts.append(f"- {msg_type}: {content}")
+            
+            # Add application progress indicators based on workflow
+            progress_indicators = self._get_workflow_progress_indicators(data, current_workflow)
+            if progress_indicators:
+                context_parts.append("\nAPPLICATION PROGRESS:")
+                context_parts.extend(progress_indicators)
+            
+            return "\n".join(context_parts) if context_parts else "No previous context available."
+            
+        except Exception as e:
+            logger.error(f"Error extracting conversation context: {e}")
+            return "Error extracting conversation context."
+    
+    def _determine_current_workflow(self, data: Dict[str, Any], history: List[Dict[str, Any]]) -> str:
+        """
+        Determine which workflow (A or B) is currently active
+        
+        Args:
+            data: Session data
+            history: Conversation history
+            
+        Returns:
+            "Workflow A" or "Workflow B"
+        """
+        try:
+            # Check if Aadhaar upload was requested or processed
+            for msg in history:
+                content = msg.get("content", "").lower()
+                if "aadhaar" in content and "upload" in content:
+                    return "Workflow B"
+            
+            # Check if Aadhaar is already processed
+            if data.get("aadhaar_uploaded"):
+                return "Workflow A"
+            
+            # Check if get_prefill_data returned status 500 with phoneToPrefill_failed
+            for msg in history:
+                content = msg.get("content", "")
+                if "phoneToPrefill_failed" in content:
+                    return "Workflow B"
+            
+            # Default to Workflow A
+            return "Workflow A"
+            
+        except Exception as e:
+            logger.error(f"Error determining current workflow: {e}")
+            return "Workflow A"
+    
+    def _determine_current_workflow_step(self, data: Dict[str, Any], history: List[Dict[str, Any]], workflow: str) -> str:
+        """
+        Determine the current step in the workflow
+        
+        Args:
+            data: Session data
+            history: Conversation history
+            workflow: Current workflow (A or B)
+            
+        Returns:
+            Current step description
+        """
+        try:
+            if workflow == "Workflow A":
+                return self._determine_workflow_a_step(data, history)
+            else:
+                return self._determine_workflow_b_step(data, history)
+                
+        except Exception as e:
+            logger.error(f"Error determining current workflow step: {e}")
+            return "Unknown step"
+    
+    def _determine_workflow_a_step(self, data: Dict[str, Any], history: List[Dict[str, Any]]) -> str:
+        """
+        Determine current step in Workflow A
+        """
+        try:
+            # Check if treatment cost is below minimum
+            if data.get("treatmentCost") and data.get("treatmentCost") < 3000:
+                return "Treatment cost below minimum (₹3,000) - Application stopped"
+            
+            # Check if Juspay Cardless is eligible
+            for msg in history:
+                content = msg.get("content", "")
+                if "ELIGIBLE" in content and "Juspay Cardless" in content:
+                    return "Juspay Cardless approved - Application completed"
+            
+            # Check workflow steps
+            if not data.get("fullName") or not data.get("phoneNumber") or not data.get("treatmentCost") or not data.get("monthlyIncome"):
+                return "Step 1: Initial Data Collection"
+            
+            if not data.get("userId"):
+                return "Step 2: User ID Creation"
+            
+            if not data.get("basic_details_submitted"):
+                return "Step 3: Basic Details Submission"
+            
+            if not data.get("loan_details_submitted"):
+                return "Step 4: Save Loan Details"
+            
+            # Check if Juspay Cardless check is done
+            jp_cardless_checked = any("check_jp_cardless" in str(msg.get("content", "")) for msg in history)
+            if not jp_cardless_checked:
+                return "Step 5: Check Juspay Cardless"
+            
+            if not data.get("prefill_data_processed"):
+                return "Step 6: Data Prefill"
+            
+            if not data.get("address_processed"):
+                return "Step 7: Address Processing"
+            
+            if not data.get("basic_details_prefill_processed"):
+                return "Step 8: Process Prefill Data for Basic Details"
+            
+            # Check for missing details collection
+            if data.get("additional_details", {}).get("collection_step"):
+                return f"Step 8: Collecting Missing Details - {data.get('additional_details', {}).get('collection_step')}"
+            
+            # Check if missing details collection is complete but basic details prefill is not processed
+            if data.get("all_details_collected") and not data.get("basic_details_prefill_processed"):
+                return "Step 8: Processing Basic Details After Missing Details Collection"
+            
+            if not data.get("pan_verified"):
+                return "Step 9: PAN Card Collection"
+            
+            if not data.get("employment_verified"):
+                return "Step 10: Employment Verification"
+            
+            if not data.get("employment_details_submitted"):
+                return "Step 11: Save Employment Details"
+            
+            if not data.get("bureau_decision_processed"):
+                return "Step 12: Process Loan Application (Bureau Decision)"
+            
+            return "Application completed - Bureau decision processed"
+            
+        except Exception as e:
+            logger.error(f"Error determining Workflow A step: {e}")
+            return "Unknown step"
+    
+    def _determine_workflow_b_step(self, data: Dict[str, Any], history: List[Dict[str, Any]]) -> str:
+        """
+        Determine current step in Workflow B
+        """
+        try:
+            # Check if Aadhaar is uploaded
+            if not data.get("aadhaar_uploaded"):
+                return "Step 1: Aadhaar Upload Request"
+            
+            # Check if PAN is provided
+            if not data.get("panNumber"):
+                return "Step 2: PAN Card Collection"
+            
+            # Check if email is provided
+            if not data.get("email"):
+                return "Step 3: Email Collection"
+            
+            # Check if PAN verification is done
+            if not data.get("pan_verified"):
+                return "Step 4: PAN Verification"
+            
+            # Check if employment verification is done
+            if not data.get("employment_verified"):
+                return "Step 5: Employment Verification"
+            
+            # Check if employment details are saved
+            if not data.get("employment_details_submitted"):
+                return "Step 6: Save Employment Details"
+            
+            # Check if bureau decision is processed
+            if not data.get("bureau_decision_processed"):
+                return "Step 7: Process Loan Application (Bureau Decision)"
+            
+            return "Application completed - Bureau decision processed"
+            
+        except Exception as e:
+            logger.error(f"Error determining Workflow B step: {e}")
+            return "Unknown step"
+    
+    def _get_workflow_progress_indicators(self, data: Dict[str, Any], workflow: str) -> List[str]:
+        """
+        Get progress indicators based on the current workflow
+        
+        Args:
+            data: Session data
+            workflow: Current workflow (A or B)
+            
+        Returns:
+            List of progress indicators
+        """
+        try:
+            indicators = []
+            
+            if workflow == "Workflow A":
+                # Workflow A progress indicators
+                if data.get("userId"):
+                    indicators.append("✓ User ID created")
+                if data.get("fullName") and data.get("phoneNumber") and data.get("treatmentCost") and data.get("monthlyIncome"):
+                    indicators.append("✓ Initial data collected")
+                if data.get("basic_details_submitted"):
+                    indicators.append("✓ Basic details submitted")
+                if data.get("loan_details_submitted"):
+                    indicators.append("✓ Loan details submitted")
+                if data.get("prefill_data_processed"):
+                    indicators.append("✓ Data prefill processed")
+                if data.get("address_processed"):
+                    indicators.append("✓ Address processed")
+                if data.get("basic_details_prefill_processed"):
+                    indicators.append("✓ Basic details prefill processed")
+                if data.get("all_details_collected"):
+                    indicators.append("✓ All missing details collected")
+                if data.get("pan_verified"):
+                    indicators.append("✓ PAN verified")
+                if data.get("employment_verified"):
+                    indicators.append("✓ Employment verified")
+                if data.get("employment_details_submitted"):
+                    indicators.append("✓ Employment details submitted")
+                if data.get("bureau_decision_processed"):
+                    indicators.append("✓ Bureau decision processed")
+            else:
+                # Workflow B progress indicators
+                if data.get("aadhaar_uploaded"):
+                    indicators.append("✓ Aadhaar uploaded")
+                if data.get("panNumber"):
+                    indicators.append("✓ PAN number provided")
+                if data.get("email"):
+                    indicators.append("✓ Email provided")
+                if data.get("pan_verified"):
+                    indicators.append("✓ PAN verified")
+                if data.get("employment_verified"):
+                    indicators.append("✓ Employment verified")
+                if data.get("employment_details_submitted"):
+                    indicators.append("✓ Employment details submitted")
+                if data.get("bureau_decision_processed"):
+                    indicators.append("✓ Bureau decision processed")
+            
+            return indicators
+            
+        except Exception as e:
+            logger.error(f"Error getting workflow progress indicators: {e}")
+            return []
+    
+    def _validate_context_consistency(self, session_id: str, message: str, ai_message: str) -> bool:
+        """
+        Validate that the AI response is consistent with the conversation context
+        
+        Args:
+            session_id: Session identifier
+            message: User message
+            ai_message: AI response
+            
+        Returns:
+            True if context is consistent, False if inconsistencies detected
+        """
+        try:
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                return True
+            
+            data = session.get("data", {})
+            message_lower = message.lower()
+            ai_message_lower = ai_message.lower()
+            
+            # Check for common hallucination patterns
+            inconsistencies = []
+            
+            # Check if AI is asking for information that's already been provided
+            if data.get("fullName") and "name" in ai_message_lower and "what is" in ai_message_lower:
+                inconsistencies.append("AI asking for name when already provided")
+            
+            if data.get("phoneNumber") and "phone" in ai_message_lower and "what is" in ai_message_lower:
+                inconsistencies.append("AI asking for phone when already provided")
+            
+            if data.get("treatmentCost") and "cost" in ai_message_lower and "what is" in ai_message_lower:
+                inconsistencies.append("AI asking for treatment cost when already provided")
+            
+            if data.get("monthlyIncome") and "income" in ai_message_lower and "what is" in ai_message_lower:
+                inconsistencies.append("AI asking for income when already provided")
+            
+            # Check workflow-specific inconsistencies
+            current_workflow = self._determine_current_workflow(data, session.get("history", []))
+            
+            if current_workflow == "Workflow A":
+                # In Workflow A, never ask for Aadhaar upload
+                if "aadhaar" in ai_message_lower and "upload" in ai_message_lower:
+                    inconsistencies.append("AI asking for Aadhaar upload in Workflow A")
+            else:
+                # In Workflow B, don't ask for Aadhaar again if already uploaded
+                if data.get("aadhaar_uploaded") and "aadhaar" in ai_message_lower and "upload" in ai_message_lower:
+                    inconsistencies.append("AI asking for Aadhaar upload when already completed")
+            
+            # Check if AI is asking for PAN upload when PAN number is already provided
+            if data.get("panNumber") and "pan" in ai_message_lower and "upload" in ai_message_lower:
+                inconsistencies.append("AI asking for PAN upload when PAN number already provided")
+            
+            # Check if AI is asking for employment type when it's already been collected
+            if data.get("employment_type_collected") and "employment type" in ai_message_lower:
+                inconsistencies.append("AI asking for employment type when already collected")
+            
+            # Log inconsistencies for debugging
+            if inconsistencies:
+                logger.warning(f"Context inconsistencies detected in session {session_id}: {inconsistencies}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating context consistency: {e}")
+            return True  # Default to allowing the response if validation fails
+    
+    def get_conversation_context(self, session_id: str) -> str:
+        """
+        Get the current conversation context for debugging and monitoring
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Formatted conversation context
+        """
+        try:
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                return "Session not found"
+            
+            history = session.get("history", [])
+            data = session.get("data", {})
+            
+            return self._extract_conversation_context(history, data, session_id)
+            
+        except Exception as e:
+            logger.error(f"Error getting conversation context: {e}")
+            return f"Error retrieving context: {e}"
+    
+    def _create_conversation_summary(self, session_id: str) -> str:
+        """
+        Create a summary of the conversation for long sessions to maintain context
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Conversation summary
+        """
+        try:
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                return ""
+            
+            history = session.get("history", [])
+            data = session.get("data", {})
+            
+            if len(history) < 10:  # No need for summary for short conversations
+                return ""
+            
+            summary_parts = []
+            summary_parts.append("CONVERSATION SUMMARY:")
+            
+            # Determine workflow
+            current_workflow = self._determine_current_workflow(data, history)
+            summary_parts.append(f"Workflow: {current_workflow}")
+            
+            # Key milestones in the conversation
+            milestones = []
+            
+            # Check for key events in history
+            for i, msg in enumerate(history):
+                content = msg.get("content", "").lower()
+                msg_type = msg.get("type", "")
+                
+                if msg_type == "HumanMessage":
+                    if any(keyword in content for keyword in ["name:", "phone:", "cost:", "income:"]):
+                        milestones.append(f"Step {i//2 + 1}: User provided initial data")
+                    elif "aadhaar" in content and "upload" in content:
+                        milestones.append(f"Step {i//2 + 1}: User uploaded Aadhaar")
+                    elif "pan" in content and ("upload" in content or len(content.strip()) == 10):
+                        milestones.append(f"Step {i//2 + 1}: User provided PAN")
+                    elif any(keyword in content for keyword in ["1", "2", "salaried", "self-employed"]):
+                        milestones.append(f"Step {i//2 + 1}: User selected employment type")
+                    elif "@" in content and "." in content:
+                        milestones.append(f"Step {i//2 + 1}: User provided email")
+                
+                elif msg_type == "AIMessage":
+                    if "employment type" in content and "1. SALARIED" in content:
+                        milestones.append(f"Step {i//2 + 1}: AI asked for employment type")
+                    elif "aadhaar" in content and "upload" in content:
+                        milestones.append(f"Step {i//2 + 1}: AI requested Aadhaar upload")
+                    elif "pan" in content and "upload" in content:
+                        milestones.append(f"Step {i//2 + 1}: AI requested PAN upload")
+                    elif "email" in content and "address" in content:
+                        milestones.append(f"Step {i//2 + 1}: AI requested email")
+            
+            # Add unique milestones
+            unique_milestones = []
+            for milestone in milestones:
+                if milestone not in unique_milestones:
+                    unique_milestones.append(milestone)
+            
+            summary_parts.extend(unique_milestones[-5:])  # Last 5 milestones
+            
+            # Add current application status
+            if data:
+                summary_parts.append("\nCURRENT STATUS:")
+                if data.get("userId"):
+                    summary_parts.append("- User ID created and stored")
+                if data.get("fullName") and data.get("phoneNumber"):
+                    summary_parts.append("- Patient details collected")
+                if data.get("treatmentCost"):
+                    summary_parts.append(f"- Treatment cost: ₹{data.get('treatmentCost')}")
+                if data.get("aadhaar_uploaded"):
+                    summary_parts.append("- Aadhaar verification completed")
+                if data.get("panNumber"):
+                    summary_parts.append("- PAN number provided")
+                if data.get("pan_verified"):
+                    summary_parts.append("- PAN verification completed")
+                if data.get("email"):
+                    summary_parts.append("- Email provided")
+            
+            return "\n".join(summary_parts)
+            
+        except Exception as e:
+            logger.error(f"Error creating conversation summary: {e}")
+            return ""
+    
+    def _get_optimized_chat_history(self, session_id: str, max_messages: int = 10) -> List:
+        """
+        Get optimized chat history for the agent with context preservation
+        
+        Args:
+            session_id: Session identifier
+            max_messages: Maximum number of recent messages to include
+            
+        Returns:
+            Optimized chat history as LangChain messages
+        """
+        try:
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                return []
+            
+            history = session.get("history", [])
+            
+            # If history is short, return all messages
+            if len(history) <= max_messages:
+                return self._convert_to_langchain_messages(history)
+            
+            # For longer histories, keep the first message (greeting) and recent messages
+            optimized_history = []
+            
+            # Always keep the first message (initial greeting)
+            if history:
+                optimized_history.append(history[0])
+            
+            # Add recent messages
+            recent_messages = history[-(max_messages-1):] if len(history) > 1 else []
+            optimized_history.extend(recent_messages)
+            
+            return self._convert_to_langchain_messages(optimized_history)
+            
+        except Exception as e:
+            logger.error(f"Error getting optimized chat history: {e}")
+            return []
+    
+    def _update_conversation_progress(self, session_id: str, message: str, ai_message: str) -> None:
+        """
+        Update conversation progress indicators based on message content and session data
+        
+        Args:
+            session_id: Session identifier
+            message: User message
+            ai_message: AI response
+        """
+        try:
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                return
+            
+            data = session.get("data", {})
+            message_lower = message.lower()
+            ai_message_lower = ai_message.lower()
+            
+            # Track progress based on message content and AI responses
+            progress_updates = {}
+            
+            # Check for initial data collection completion
+            if (data.get("fullName") and data.get("phoneNumber") and 
+                data.get("treatmentCost") and data.get("monthlyIncome") and 
+                not data.get("initial_data_completed")):
+                progress_updates["initial_data_completed"] = True
+            
+            # Check for basic details submission
+            if "basic details" in ai_message_lower and "submitted" in ai_message_lower:
+                progress_updates["basic_details_submitted"] = True
+            
+            # Check for loan details submission
+            if "loan details" in ai_message_lower and "submitted" in ai_message_lower:
+                progress_updates["loan_details_submitted"] = True
+            
+            # Check for Aadhaar upload
+            if ("aadhaar" in message_lower and "upload" in message_lower) or "aadhaar card" in ai_message_lower:
+                progress_updates["aadhaar_uploaded"] = True
+            
+            # Check for PAN upload
+            if ("pan" in message_lower and "upload" in message_lower) or "pan card" in ai_message_lower:
+                progress_updates["pan_uploaded"] = True
+            
+            # Check for employment type collection
+            if "employment type" in ai_message_lower and "1. SALARIED" in ai_message:
+                progress_updates["employment_type_collected"] = True
+            
+            # Update progress in session data
+            for key, value in progress_updates.items():
+                SessionManager.update_session_data_field(session_id, f"data.{key}", value)
+                logger.info(f"Updated progress for session {session_id}: {key} = {value}")
+                
+        except Exception as e:
+            logger.error(f"Error updating conversation progress: {e}")
+    
     def run(self, session_id: str, message: str) -> str:
         """
         Process a user message within a session
@@ -500,8 +950,14 @@ class CarepayAgent:
             logger.info(f"Session {session_id}: Using full agent executor (status: {current_status})")
             session_tools = self._create_session_aware_tools(session_id)
 
+            # Create context-aware system prompt with conversation history and session data
+            context_aware_system_prompt = self._create_context_aware_system_prompt(session_id)
+            
+            # Get optimized chat history for better context management
+            optimized_chat_history = self._get_optimized_chat_history(session_id, max_messages=12)
+            
             prompt = ChatPromptTemplate.from_messages([
-                ("system", self.system_prompt),
+                ("system", context_aware_system_prompt),
                 ("human", "{input}"),
                 MessagesPlaceholder(variable_name="chat_history"),
                 MessagesPlaceholder(variable_name="agent_scratchpad"),
@@ -517,7 +973,8 @@ class CarepayAgent:
                 return_intermediate_steps=True,  # Ensure we get intermediate steps
             )
 
-            chat_history = self._convert_to_langchain_messages(session.get("history", []))
+            # Use optimized chat history instead of full history
+            chat_history = optimized_chat_history.copy()
             chat_history.append(HumanMessage(content=message))
 
             # Check if the message might trigger employment type questions
@@ -717,7 +1174,7 @@ class CarepayAgent:
 
     def _update_session_history(self, session_id: str, user_message: str, ai_message: str) -> None:
         """
-        Efficiently update session history with new messages
+        Efficiently update session history with new messages and track progress
         
         Args:
             session_id: Session identifier
@@ -744,6 +1201,14 @@ class CarepayAgent:
             
             # Update history in database (single operation)
             SessionManager.update_session_data_field(session_id, "history", current_history)
+            
+            # Update conversation progress tracking
+            self._update_conversation_progress(session_id, user_message, ai_message)
+            
+            # Validate context consistency to prevent hallucination
+            is_consistent = self._validate_context_consistency(session_id, user_message, ai_message)
+            if not is_consistent:
+                logger.warning(f"Context inconsistency detected in session {session_id}. AI response may need review.")
             
         except Exception as e:
             logger.error(f"Error updating session history: {e}")
@@ -1572,14 +2037,14 @@ class CarepayAgent:
 
     def process_prefill_data_for_basic_details(self, session_id: str) -> str:
         """
-        Process prefill data and return a properly formatted JSON string for save_basic_details.
-        This version fetches prefill data details directly from the API response stored in the session.
+        Process prefill data and check for missing details. If any required details are missing,
+        always save the available details using the API client, and return a message asking the user to provide the missing ones.
 
         Args:
             session_id: Session identifier.
 
         Returns:
-            JSON string for save_basic_details
+            JSON string for save_basic_details or message asking for missing details
         """
         try:
             # 1. Get user_id if not provided
@@ -1608,7 +2073,6 @@ class CarepayAgent:
             data = {"userId": user_id, "formStatus": "Basic"}
 
             # 4. Get name and phone from session if available
-            # (session_data already set above)
             if "name" in session_data and session_data["name"] is not None:
                 data["firstName"] = session_data["name"]
             elif "fullName" in session_data and session_data["fullName"] is not None:
@@ -1649,9 +2113,8 @@ class CarepayAgent:
                         data["emailId"] = email_data[0]
                 elif isinstance(email_data, str) and email_data.strip():
                     data["emailId"] = email_data
-                # If email_data is None, empty string, empty list, or invalid, don't set emailId
 
-            # Also extract from nested "response" if it exists (sometimes API nests again)
+            # Also extract from nested "response" if it exists
             if "response" in prefill_data and isinstance(prefill_data["response"], dict):
                 response = prefill_data["response"]
                 for target_field, source_fields in field_mappings.items():
@@ -1667,36 +2130,69 @@ class CarepayAgent:
                 if "email" in response and response["email"] is not None and "emailId" not in data:
                     email_data = response["email"]
                     if isinstance(email_data, list):
-                        if email_data:  # list is not empty
+                        if email_data:
                             if isinstance(email_data[0], dict) and "email" in email_data[0] and email_data[0]["email"] is not None:
                                 data["emailId"] = str(email_data[0]["email"])
                             else:
                                 data["emailId"] = str(email_data[0])
-                        # if list is empty, do not set emailId
                     elif isinstance(email_data, dict) and "email" in email_data and email_data["email"] is not None:
                         data["emailId"] = str(email_data["email"])
                     elif isinstance(email_data, str) and email_data.strip():
                         data["emailId"] = str(email_data)
-                    # If email_data is None, empty string, empty list, or invalid, don't set emailId
                 # Handle phone number in response if needed
                 if "mobile" in response and response["mobile"] is not None and "mobileNumber" not in data:
                     data["mobileNumber"] = response["mobile"]
 
-            # Debug log what we're sending
-            logger.info(f"Sending to save_basic_details: user_id={user_id}, data={data}")
+            # 6. Check for missing required details
+            missing_details = []
+            required_fields = ["panCard", "gender", "dateOfBirth", "emailId"]
+            
+            for field in required_fields:
+                if field not in data or not data[field] or data[field].strip() == "":
+                    missing_details.append(field)
 
-            # Store the processed data in session for other methods to use
-            if session_id:
-                for key, value in data.items():
-                    if key != "userId":
-                        SessionManager.update_session_data_field(session_id, f"data.{key}", value)
-                logger.info(f"Stored processed prefill data in session: {data}")
-
-            # Call the API client to save basic details
+            # Always save the available details, even if some are missing
+            logger.info(f"Saving available prefill details: user_id={user_id}, data={data}")
             result = self.api_client.save_prefill_details(user_id, data)
-            logger.info(f"Saved prefill details: {result}")
+            logger.info(f"Saved (partial) prefill details: {result}")
             if session_id:
                 SessionManager.update_session_data_field(session_id, "data.api_responses.save_prefill_details", result)
+                # Only mark as completed if nothing is missing
+                if not missing_details:
+                    SessionManager.update_session_data_field(session_id, "data.basic_details_completed", True)
+
+            # If there are missing details, ask the user to provide them
+            if missing_details:
+                missing_messages = []
+                for field in missing_details:
+                    if field == "panCard":
+                        missing_messages.append("PAN card number")
+                    elif field == "gender":
+                        missing_messages.append("gender (Male/Female/Other)")
+                    elif field == "dateOfBirth":
+                        missing_messages.append("date of birth (YYYY-MM-DD format)")
+                    elif field == "emailId":
+                        missing_messages.append("email address")
+                
+                missing_text = ", ".join(missing_messages)
+                response_message = f"I need some additional information to complete your application. Please provide your {missing_text}."
+                
+                # Store the missing details in session for the agent to handle
+                if session_id:
+                    SessionManager.update_session_data_field(session_id, "data.missing_details", missing_details)
+                    SessionManager.update_session_data_field(session_id, "data.prefill_data_processed", data)
+                    logger.info(f"Missing details detected: {missing_details}")
+                
+                return json.dumps({
+                    "status": "missing_details",
+                    "message": response_message,
+                    "missing_details": missing_details,
+                    "available_data": data,
+                    "save_result": result
+                })
+
+            # All details are available, return the save result
+            logger.info(f"All basic details present and saved for user_id={user_id}")
             return json.dumps(result)
         except Exception as e:
             logger.error(f"Error processing prefill data: {e}")
@@ -1704,7 +2200,7 @@ class CarepayAgent:
                 return json.dumps({"userId": user_id, "error": str(e)})
             else:
                 return json.dumps({"error": str(e)})
-
+            
     def process_address_data(self, session_id: str) -> str:
         """
         Extract address information from prefill data and save it using save_address_details.
@@ -2983,116 +3479,6 @@ Continue your journey with the link here:
         except Exception as e:
             logger.error(f"Error in early chain finish validation: {e}")
 
-    # def _should_retry_early_chain_finish(self, session_id: str, response: Dict[str, Any]) -> bool:
-    #     """
-    #     Check if we should retry due to early chain finish
-        
-    #     Args:
-    #         session_id: Session identifier
-    #         response: Agent response
-            
-    #     Returns:
-    #         True if retry is needed
-    #     """
-    #     try:
-    #         session = SessionManager.get_session_from_db(session_id)
-    #         if not session:
-    #             return False
-            
-    #         # Check if we have a userId - if yes, we're past initial data collection
-    #         if session.get("data", {}).get("userId"):
-    #             return False  # Don't retry if we have userId
-            
-    #         # Only retry if we're in initial data collection and missing critical steps
-    #         if session.get("status") == "active":
-    #             executed_tools = []
-    #             if "intermediate_steps" in response:
-    #                 executed_tools = [step[0].tool for step in response["intermediate_steps"]]
-                
-    #             # Check if we're missing critical steps
-    #             critical_steps = ["save_loan_details", "check_jp_cardless", "get_prefill_data"]
-    #             missing_critical = [step for step in critical_steps if step not in executed_tools]
-                
-    #             # Only retry if we have some tools executed but missing critical ones
-    #             return len(executed_tools) > 0 and len(missing_critical) > 0
-                
-    #         return False
-    #     except Exception as e:
-    #         logger.error(f"Error checking retry condition: {e}")
-    #         return False
-
-    # def _retry_with_explicit_continuation(self, session_id: str, message: str) -> str:
-    #     """
-    #     Retry with explicit continuation prompt
-        
-    #     Args:
-    #         session_id: Session identifier
-    #         message: Original user message
-            
-    #     Returns:
-    #         Retry response
-    #     """
-    #     try:
-    #         logger.info(f"Session {session_id}: Retrying with explicit continuation")
-            
-    #         # Create a more explicit prompt for continuation
-    #         explicit_prompt = """
-    #         CRITICAL: You have completed some steps but need to continue. You MUST execute the remaining steps:
-
-    #         1. Call save_loan_details with the user data
-    #         2. Call check_jp_cardless 
-    #         3. Call get_prefill_data
-    #         4. Call process_prefill_data
-    #         5. Call process_address_data
-    #         6. Call pan_verification
-    #         7. Call get_employment_verification
-    #         8. Call save_employment_details
-    #         9. Call get_bureau_decision
-
-    #         Do NOT stop until you complete ALL remaining steps. Continue immediately.
-    #         """
-            
-    #         # Create session-specific agent with explicit prompt
-    #         session_tools = self._create_session_aware_tools(session_id)
-            
-    #         # Create the prompt with explicit continuation
-    #         prompt = ChatPromptTemplate.from_messages([
-    #             ("system", explicit_prompt),
-    #             ("human", "{input}"),
-    #             MessagesPlaceholder(variable_name="chat_history"),
-    #             MessagesPlaceholder(variable_name="agent_scratchpad"),
-    #         ])
-
-    #         # Create session-specific agent
-    #         agent = create_openai_functions_agent(self.llm, session_tools, prompt)
-    #         session_agent_executor = AgentExecutor(
-    #             agent=agent,
-    #             tools=session_tools,
-    #             verbose=True,
-    #             max_iterations=50,
-    #             handle_parsing_errors=True,
-    #         )
-            
-    #         # Get session for chat history
-    #         session = SessionManager.get_session_from_db(session_id)
-    #         chat_history = session.get("history", []) if session else []
-            
-    #         # Execute with explicit continuation
-    #         response = session_agent_executor.invoke({
-    #             "input": "Continue with the remaining loan application steps", 
-    #             "chat_history": chat_history
-    #         })
-            
-    #         ai_message = response.get("output", "Continuing with loan application steps...")
-            
-    #         # Update conversation history efficiently
-    #         self._update_session_history(session_id, message, ai_message)
-            
-    #         return ai_message
-            
-    #     except Exception as e:
-    #         logger.error(f"Error in retry with explicit continuation: {e}")
-    #         return "I'm continuing with your loan application. Please wait while I process the remaining steps."
 
     def _format_bureau_decision_response(self, bureau_decision: Dict[str, Any], session_id: str) -> str:
         """
@@ -3319,9 +3705,8 @@ Please Enter input 1 or 2 only"""
             # After successful PAN card save, ask for email address
             return {
                 'status': 'success',
-                'message': "PAN card number saved successfully. Now, please provide your email address to continue with the loan application process.",
+                'message': "PAN card number saved successfully. ",
                 'data': {'panCard': pan_number},
-                'next_step': 'email_collection'
             }
             
         except Exception as e:
@@ -3424,21 +3809,23 @@ Please Enter input 1 or 2 only"""
                     'message': "Failed to save email address. Please try again."
                 }
             
-            return {
+            import json
+            return json.dumps({
                 'status': 'success',
                 'message': "Email address saved successfully. Now continuing with the remaining verification steps automatically...",
                 'data': {'emailId': email_address},
                 'continue_chain': True,
                 'session_id': session_id,
-                'next_steps': ['pan_verification', 'get_employment_verification', 'save_employment_details', 'get_bureau_decision']
-            }
+                'next_step': 'pan_verification, employment_verification, save_employment_details, get_bureau_decision'
+            })
             
         except Exception as e:
             logger.error(f"Error handling email address: {e}")
-            return {
+            import json
+            return json.dumps({
                 'status': 'error',
                 'message': f"Error processing email address: {str(e)}"
-            }
+            })
 
     def handle_aadhaar_upload(self, document_path: str, session_id: str) -> dict:
         try:
@@ -3638,11 +4025,21 @@ Please Enter input 1 or 2 only"""
             # Store the API response
             SessionManager.update_session_data_field(session_id, "data.api_responses.save_gender_details", result)
 
-            return json.dumps(result)
+            import json
+            return json.dumps({
+                'status': 'success',
+                'message': "Gender saved successfully. Now proceeding to PAN verification and employment verification steps. Please wait while I process the next steps automatically.",
+                'data': result,
+                'session_id': session_id
+            })
 
         except Exception as e:
             logger.error(f"Error saving gender details: {e}")
-            return f"Error saving gender details: {str(e)}"
+            import json
+            return json.dumps({
+                'status': 'error',
+                'message': f"Error saving gender details: {str(e)}"
+            })
 
     def save_marital_status_details(self, marital_status: str, session_id: str) -> str:
         """

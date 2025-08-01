@@ -12,7 +12,7 @@ class CarepayAPIClient:
     """
     
     def __init__(self):
-        self.base_url = os.getenv('CAREPAY_API_BASE_URL', 'https://backend.carepay.money')
+        self.base_url = os.getenv('CAREPAY_API_BASE_URL', 'https://uatbackend.carepay.money')
        
     
         
