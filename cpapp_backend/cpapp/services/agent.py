@@ -2254,6 +2254,8 @@ Thank you! Your application is now complete. Loan application decision: {decisio
         1. If Fibe GREEN -> APPROVED with Fibe link
         2. If Fibe AMBER:
            - If bureau APPROVED -> APPROVED with profile link
+           - If bureau INCOME_VERIFICATION_REQUIRED -> INCOME_VERIFICATION_REQUIRED with Fibe link
+           - If bureau REJECTED -> REJECTED with profile link
            - Otherwise -> INCOME_VERIFICATION_REQUIRED with Fibe link
         3. If Fibe RED or profile ingestion 500 error -> Fall back to bureau decision with profile link
         4. If no Fibe status -> Use bureau decision with profile link
@@ -2294,7 +2296,18 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             # Extract bureau status
             if bureau_decision:
                 bureau_status = bureau_decision.get("status")
-                logger.info(f"Session {session_id}: Bureau status: {bureau_status}")
+                logger.info(f"Session {session_id}: Bureau status: {bureau_status} (type: {type(bureau_status)})")
+                logger.info(f"Session {session_id}: Full bureau decision: {bureau_decision}")
+                
+                # Debug: Check exact string matching
+                if bureau_status:
+                    logger.info(f"Session {session_id}: Bureau status checks:")
+                    logger.info(f"  - Exact match 'INCOME_VERIFICATION_REQUIRED': {bureau_status == 'INCOME_VERIFICATION_REQUIRED'}")
+                    logger.info(f"  - Upper case match: {bureau_status.upper() == 'INCOME_VERIFICATION_REQUIRED'}")
+                    logger.info(f"  - Contains 'income verification required': {'income verification required' in bureau_status.lower()}")
+                    logger.info(f"  - Raw status value: '{bureau_status}'")
+            else:
+                logger.warning(f"Session {session_id}: No bureau decision found in session data")
             
             # Apply decision flow logic
             decision_status = None
@@ -2309,23 +2322,35 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             # 2. If Fibe AMBER
             elif fibe_status == "AMBER":
                 # If bureau APPROVED -> APPROVED with profile link
-                if bureau_status and bureau_status.upper() == "APPROVED":
+                if bureau_status and (bureau_status.upper() == "APPROVED" or "approved" in bureau_status.lower()):
                     decision_status = "APPROVED"
                     link_to_use = profile_link
                     logger.info(f"Session {session_id}: Fibe AMBER + Bureau APPROVED -> APPROVED with profile link")
+                # If bureau INCOME_VERIFICATION_REQUIRED -> INCOME_VERIFICATION_REQUIRED with Fibe link
+                elif bureau_status and (bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED" or "income verification required" in bureau_status.lower()):
+                    decision_status = "INCOME_VERIFICATION_REQUIRED"
+                    link_to_use = fibe_link if fibe_link else profile_link
+                    logger.info(f"Session {session_id}: Fibe AMBER + Bureau INCOME_VERIFICATION_REQUIRED -> INCOME_VERIFICATION_REQUIRED with Fibe link")
+                    logger.info(f"Session {session_id}: Matched INCOME_VERIFICATION_REQUIRED condition")
+                # If bureau REJECTED -> REJECTED with profile link
+                elif bureau_status and (bureau_status.upper() == "REJECTED" or "rejected" in bureau_status.lower()):
+                    decision_status = "REJECTED"
+                    link_to_use = profile_link
+                    logger.info(f"Session {session_id}: Fibe AMBER + Bureau REJECTED -> REJECTED with profile link")
                 # Otherwise -> INCOME_VERIFICATION_REQUIRED with Fibe link
                 else:
                     decision_status = "INCOME_VERIFICATION_REQUIRED"
                     link_to_use = fibe_link if fibe_link else profile_link
                     logger.info(f"Session {session_id}: Fibe AMBER + Bureau not APPROVED -> INCOME_VERIFICATION_REQUIRED with Fibe link")
+                    logger.info(f"Session {session_id}: Fell through to else condition - bureau_status: '{bureau_status}'")
             
             # 3. If Fibe RED or profile ingestion 500 error -> Fall back to bureau decision with profile link
             elif fibe_status == "RED":
-                if bureau_status and bureau_status.upper() == "APPROVED":
+                if bureau_status and (bureau_status.upper() == "APPROVED" or "approved" in bureau_status.lower()):
                     decision_status = "APPROVED"
-                elif bureau_status and bureau_status.upper() == "REJECTED":
+                elif bureau_status and (bureau_status.upper() == "REJECTED" or "rejected" in bureau_status.lower()):
                     decision_status = "REJECTED"
-                elif bureau_status and bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED":
+                elif bureau_status and (bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED" or "income verification required" in bureau_status.lower()):
                     decision_status = "INCOME_VERIFICATION_REQUIRED"
                 else:
                     decision_status = "PENDING"
@@ -2334,11 +2359,11 @@ Thank you! Your application is now complete. Loan application decision: {decisio
             
             # 4. If no Fibe status -> Use bureau decision with profile link
             elif fibe_status is None:
-                if bureau_status and bureau_status.upper() == "APPROVED":
+                if bureau_status and (bureau_status.upper() == "APPROVED" or "approved" in bureau_status.lower()):
                     decision_status = "APPROVED"
-                elif bureau_status and bureau_status.upper() == "REJECTED":
+                elif bureau_status and (bureau_status.upper() == "REJECTED" or "rejected" in bureau_status.lower()):
                     decision_status = "REJECTED"
-                elif bureau_status and bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED":
+                elif bureau_status and (bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED" or "income verification required" in bureau_status.lower()):
                     decision_status = "INCOME_VERIFICATION_REQUIRED"
                 else:
                     decision_status = "PENDING"
@@ -2350,14 +2375,15 @@ Thank you! Your application is now complete. Loan application decision: {decisio
                 decision_status = "PENDING"
                 link_to_use = profile_link
                 logger.info(f"Session {session_id}: No decisions available -> PENDING with profile link")
+                logger.info(f"Session {session_id}: Fell through to final PENDING condition - fibe_status: '{fibe_status}', bureau_status: '{bureau_status}'")
             
             logger.info(f"Session {session_id}: Final decision - Status: {decision_status}, Link: {link_to_use}")
+            logger.info(f"Session {session_id}: Decision logic summary - Fibe: {fibe_status}, Bureau: {bureau_status}, Final: {decision_status}")
             
             return {
                 "status": decision_status,
                 "link": link_to_use
             }
-            
         except Exception as e:
             logger.error(f"Error determining loan decision for session {session_id}: {e}")
             return {"status": "PENDING", "link": profile_link}
