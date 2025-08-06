@@ -3279,18 +3279,17 @@ Please check your application status by visiting the following:
                     link_to_use = fibe_link if fibe_link else profile_link
                     logger.info(f"Session {session_id}: Fibe AMBER + Bureau INCOME_VERIFICATION_REQUIRED -> INCOME_VERIFICATION_REQUIRED with Fibe link")
                     logger.info(f"Session {session_id}: Matched INCOME_VERIFICATION_REQUIRED condition")
-                # If bureau REJECTED -> REJECTED with profile link
+                # If bureau REJECTED -> INCOME_VERIFICATION_REQUIRED with Fibe link (changed as per new rule)
                 elif bureau_status and (bureau_status.upper() == "REJECTED" or "rejected" in bureau_status.lower()):
-                    decision_status = "REJECTED"
-                    link_to_use = profile_link
-                    logger.info(f"Session {session_id}: Fibe AMBER + Bureau REJECTED -> REJECTED with profile link")
+                    decision_status = "INCOME_VERIFICATION_REQUIRED"
+                    link_to_use = fibe_link if fibe_link else profile_link
+                    logger.info(f"Session {session_id}: Fibe AMBER + Bureau REJECTED -> INCOME_VERIFICATION_REQUIRED with Fibe link (per new rule)")
                 # Otherwise -> INCOME_VERIFICATION_REQUIRED with Fibe link
                 else:
                     decision_status = "INCOME_VERIFICATION_REQUIRED"
                     link_to_use = fibe_link if fibe_link else profile_link
                     logger.info(f"Session {session_id}: Fibe AMBER + Bureau not APPROVED -> INCOME_VERIFICATION_REQUIRED with Fibe link")
                     logger.info(f"Session {session_id}: Fell through to else condition - bureau_status: '{bureau_status}'")
-            
             # 3. If Fibe RED or profile ingestion 500 error -> Fall back to bureau decision with profile link
             elif fibe_status == "RED":
                 if bureau_status and (bureau_status.upper() == "APPROVED" or "approved" in bureau_status.lower()):
