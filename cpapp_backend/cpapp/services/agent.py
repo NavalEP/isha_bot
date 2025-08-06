@@ -78,8 +78,8 @@ class CarepayAgent:
              * treatmentCost (minimum ₹3,000, must be positive)
              * monthlyIncome (must be positive)
            - If any are missing, ask for the remaining ones.
-           - If treatmentCost < ₹3,000, STOP and return:  
-             "I understand your treatment cost is below ₹3,000. Currently, I can only process loan applications for treatments costing ₹3,000 or more. Please let me know if your treatment cost is ₹3,000 or above, and I'll be happy to help you with the loan application process."
+           - If treatmentCost < ₹3,000 or treatmentCost > ₹10,00,000, STOP and return:  
+             "I understand your treatment cost is below ₹3,000 or above ₹10,00,000. Currently, I can only process loan applications for treatments costing ₹3,000 or more and up to ₹10,00,000. Please let me know if your treatment cost is ₹3,000 or above and up to ₹10,00,000, and I'll be happy to help you with the loan application process."
            - Use `store_user_data` tool to save these details.
 
         2. **User ID Creation**
@@ -462,9 +462,13 @@ CRITICAL CONTEXT AWARENESS RULES:
         Determine current step in Workflow A
         """
         try:
-            # Check if treatment cost is below minimum
-            if data.get("treatmentCost") and data.get("treatmentCost") < 3000:
-                return "Treatment cost below minimum (₹3,000) - Application stopped"
+            # Check if treatment cost is below minimum or above maximum
+            treatment_cost = data.get("treatmentCost")
+            if treatment_cost:
+                if treatment_cost < 3000:
+                    return "Treatment cost below minimum (₹3,000) - Application stopped"
+                elif treatment_cost > 1000000:
+                    return "Treatment cost above maximum (₹10,00,000) - Application stopped"
             
             # Check if Juspay Cardless is eligible
             for msg in history:
@@ -1334,7 +1338,9 @@ CRITICAL CONTEXT AWARENESS RULES:
                     cost_value = float(cost_str)
                     
                     if cost_value < 3000:
-                        return f"I understand your treatment cost is ₹{cost_value:,.0f}. Currently, I can only process loan applications for treatments costing ₹18,000 or more. Please let me know if your treatment cost is ₹18,000 or above, and I'll be happy to help you with the loan application process."
+                        return f"I understand your treatment cost is ₹{cost_value:,.0f}. Currently, I can only process loan applications for treatments costing ₹3,000 or more. Please let me know if your treatment cost is ₹3,000 or above, and I'll be happy to help you with the loan application process."
+                    elif cost_value > 1000000:
+                        return f"I understand your treatment cost is ₹{cost_value:,.0f}. Currently, I can only process loan applications for treatments costing up to ₹10,00,000. Please let me know if your treatment cost is ₹10,00,000 or below, and I'll be happy to help you with the loan application process."
                 except (ValueError, TypeError):
                     # If we can't parse the cost, continue with normal flow
                     logger.warning(f"Could not parse treatment cost: {treatment_cost}")
@@ -3184,7 +3190,7 @@ Please check your application status by visiting the following:
             Tool(
                 name="correct_treatment_cost",
                 func=lambda new_treatment_cost: self.correct_treatment_cost(new_treatment_cost, session_id),
-                description="Correct/update the treatment cost in the loan application. Use this when user provides a new treatment cost like '5000', '10000', '90000', etc. (must be >= ₹3,000). Call this tool immediately when user provides a numeric treatment cost amount.",
+                description="Correct/update the treatment cost in the loan application. Use this when user provides a new treatment cost like '5000', '10000', '90000', etc. (must be >= ₹3,000 and <= ₹10,00,000). Call this tool immediately when user provides a numeric treatment cost amount.",
             ),
             Tool(
                 name="correct_date_of_birth",
@@ -4212,7 +4218,7 @@ Please Enter input 1 or 2 only"""
         Correct/update the treatment cost in the loan application
         
         Args:
-            new_treatment_cost: The new/corrected treatment cost (must be >= 3000)
+            new_treatment_cost: The new/corrected treatment cost (must be >= 3000 and <= 1000000)
             session_id: Session ID to get user data from
             
         Returns:
@@ -4229,6 +4235,8 @@ Please Enter input 1 or 2 only"""
             # Validate treatment cost
             if new_treatment_cost < 3000:
                 return "❌ Error: Treatment cost must be ₹3,000 or more. Please enter a valid amount."
+            elif new_treatment_cost > 1000000:
+                return "❌ Error: Treatment cost cannot exceed ₹10,00,000. Please enter a valid amount."
             
             # Get session data
             session_data = SessionManager.get_session_from_db(session_id)
