@@ -12,7 +12,7 @@ class CarepayAPIClient:
     """
     
     def __init__(self):
-        self.base_url = os.getenv('CAREPAY_API_BASE_URL', 'https://uatbackend.carepay.money')
+        self.base_url = os.getenv('CAREPAY_API_BASE_URL', 'https://backend.carepay.money')
        
     
         
@@ -690,3 +690,48 @@ class CarepayAPIClient:
             "userId": user_id
         }
         return self._make_request('POST', endpoint, data=data)
+    
+    def get_user_details_by_user_id(self, user_id: str) -> Dict[str, Any]:
+            """
+            Fetch user details by user ID from the Carepay backend.
+
+            Args:
+                user_id: The user ID for which to fetch details.
+
+            Returns:
+                API response as a dictionary.
+            """
+            endpoint = f"userDetails/getUserDetailsByUserId"
+            params = {"userId": user_id}
+            return self._make_request("GET", endpoint, params=params)
+    
+    def get_user_address_by_user_id(self, user_id: str) -> Dict[str, Any]:
+                """
+                Fetch user address details by user ID from the Carepay backend.
+
+                Args:
+                    user_id: The user ID for which to fetch address details.
+
+                Returns:
+                    API response as a dictionary.
+                """
+                endpoint = "userDetails/getUserAddressByUserId"
+                params = {"userId": user_id}
+                return self._make_request("GET", endpoint, params=params)
+    
+    def get_user_employment_by_user_id(self, user_id: str) -> Dict[str, Any]:
+                    """
+                    Fetch user employment details by user ID from the Carepay backend.
+
+                    Args:
+                        user_id: The user ID for which to fetch employment details.
+
+                    Returns:
+                        API response as a dictionary.
+                    """
+                    endpoint = "userDetails/getUserEmploymentByUserId"
+                    params = {"userId": user_id}
+                    return self._make_request("GET", endpoint, params=params)
+
+    
+

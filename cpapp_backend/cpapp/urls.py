@@ -1,6 +1,6 @@
 from django.urls import path
 from django.http import JsonResponse
-from cpapp.api.chat.views import ChatSessionView, ChatMessageView, SessionDetailsView, ShortlinkRedirectView
+from cpapp.api.chat.views import ChatSessionView, ChatMessageView, SessionDetailsView, ShortlinkRedirectView, UserDetailsView, SaveUserBasicDetailsView, SaveUserAddressDetailsView, SaveUserEmploymentDetailsView
 from cpapp.api.login.views import SendOtpView, VerifyOtpView, DoctorStaffView
 from cpapp.api.document.views import AadhaarUploadView, PanCardUploadView
 from cpapp.api.treatment.views import TreatmentSearchView, TreatmentCategoriesView
@@ -17,6 +17,10 @@ urlpatterns = [
     path('login/verify-otp/', VerifyOtpView.as_view(), name='verify_otp'),
     path('login/doctor-staff/', DoctorStaffView.as_view(), name='doctor_staff'),
     path('session-details/<uuid:session_uuid>/', SessionDetailsView.as_view(), name='session_details'),
+    path('user-details/<uuid:session_uuid>/', UserDetailsView.as_view(), name='user_details'),
+    path('save-user-basic-details/<uuid:session_uuid>/', SaveUserBasicDetailsView.as_view(), name='save_user_basic_details'),
+    path('save-user-address-details/<uuid:session_uuid>/', SaveUserAddressDetailsView.as_view(), name='save_user_address_details'),
+    path('save-user-employment-details/<uuid:session_uuid>/', SaveUserEmploymentDetailsView.as_view(), name='save_user_employment_details'),
     path('s/<str:short_code>/', ShortlinkRedirectView.as_view(), name='shortlink_redirect'),
     path('documents/upload/', AadhaarUploadView.as_view(), name='aadhaar_upload'),
     path('documents/upload-pan/', PanCardUploadView.as_view(), name='pan_card_upload'),

@@ -92,7 +92,7 @@ def extract_aadhaar_details(image_path: str) -> dict:
             messages=[
                 {"role": "system", "content": "You are an expert in extracting ID information. Extract all details accurately and return in JSON format. Pay special attention to separating relationship information from address."},
                 {"role": "user", "content": [
-                    {"type": "text", "text": "Extract the following details from the Aadhaar card image and return as JSON: full_name, aadhaar_number, date_of_birth, gender, address, pincode, father_name, husband_name. For the address field, exclude relationship prefixes like 'S/O', 'W/O', 'D/O', 'H/O' - these should go in father_name or husband_name fields. The address should only contain the actual location details (village, post office, district, etc.). Extract the pincode as a separate field - look for 6-digit numbers that appear at the end of address lines or near postal information. Return only valid JSON without any additional text."},
+                    {"type": "text", "text": "Extract the following details from the Aadhaar card image and return as JSON: full_name, aadhaar_number, date_of_birth(YYYY-MM-DD), gender, address, pincode, father_name, husband_name. For the address field, exclude relationship prefixes like 'S/O', 'W/O', 'D/O', 'H/O' - these should go in father_name or husband_name fields. The address should only contain the actual location details (village, post office, district, etc.). Extract the pincode as a separate field - look for 6-digit numbers that appear at the end of address lines or near postal information. Return only valid JSON without any additional text."},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                 ]}
             ],
@@ -189,7 +189,7 @@ def extract_pan_details(image_path: str) -> dict:
             messages=[
                 {"role": "system", "content": "You are an expert in extracting PAN card information. Extract all details accurately and return in JSON format."},
                 {"role": "user", "content": [
-                    {"type": "text", "text": "Extract the following details from the PAN card image and return as JSON: pan_card_number, person_name, date_of_birth, gender, father_name. The PAN card number should be in the format XXXXX1234X (10 characters). The person_name should be the full name of the card holder. The date of birth should be in DD/MM/YYYY format. Gender should be MALE or FEMALE. Father's name should be the full name as shown on the card. Return only valid JSON without any additional text."},
+                    {"type": "text", "text": "Extract the following details from the PAN card image and return as JSON: pan_card_number, person_name, date_of_birth(YYYY-MM-DD), gender, father_name. The PAN card number should be in the format XXXXX1234X (10 characters). The person_name should be the full name of the card holder. The date of birth should be in DD/MM/YYYY format. Gender should be MALE or FEMALE. Father's name should be the full name as shown on the card. Return only valid JSON without any additional text."},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                 ]}
             ],

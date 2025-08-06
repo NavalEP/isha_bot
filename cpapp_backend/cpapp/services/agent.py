@@ -95,7 +95,7 @@ class CarepayAgent:
 
         5. **Check for Cardless Loan**
            - Use `check_jp_cardless using session_id` tool.
-           - If "ELIGIBLE": show approval message and END.
+           - If "ELIGIBLE": show approval message and END. then ask treatment reason(What is the name of treatment?) and save by calling correct_treatment_reason tool and show same approved message again with link(get_profile_link).
            - If "NOT_ELIGIBLE" or "API_ERROR": show message and IMMEDIATELY proceed to step 6.
 
         6. **Data Prefill**
@@ -116,7 +116,7 @@ class CarepayAgent:
         9. **PAN Card Collection**
            - Use `pan_verification using session_id` tool.
            - If pan_verification using session_id returns status 500 or error:
-             - Ask: "Please provide your PAN card details. You can either:\n\n1. **Upload your PAN card** by clicking the file upload button below\n2. **Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
+             - Ask: "Please provide your PAN card details. You can either:\n\n**Upload your PAN card** by clicking the file upload button below\n**Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
              - When user provides PAN, use `handle_pan_card_number` tool, then ask for email, then use `handle_email_address` tool, then continue with pan_verification and next steps.
            - If pan_verification using session_id returns status 200, continue.
 
@@ -231,7 +231,6 @@ class CarepayAgent:
                 "2. Patient's phone number (linked to their PAN)\n"
                 "3. The cost of the treatment\n"
                 "4. Monthly income of your patient.\n\n"
-                "**Example input format: name: John Doe phone number: 1234567890 treatment cost: 10000 monthly income: 50000**"
             )
             
             # Create session with initial data using single history approach
@@ -2521,7 +2520,7 @@ CRITICAL CONTEXT AWARENESS RULES:
                 
                 # Update collection step and ask for marital status
                 update_collection_step("marital_status")
-                return f"""You selected: {selected_option}
+                return f"""
 
 What is the Marital Status of the patient?
 1. Married
@@ -2545,8 +2544,7 @@ please Enter input 1 or 2 only"""
                 
                 # Update collection step and ask for education qualification
                 update_collection_step("education_qualification")
-                return f"""You selected: {selected_option}
-
+                return f"""
 What is the Education Qualification of the patient?
 1. Less than 10th
 2. Passed 10th
@@ -2603,7 +2601,7 @@ Please Enter input between 1 to 7 only"""
                 
                 # Update collection step and ask for treatment reason
                 update_collection_step("treatment_reason")
-                return f"""You selected: {selected_option}
+                return f"""
 
 What is the name of treatment?"""
             
@@ -2652,7 +2650,7 @@ What is the name of treatment?"""
                         SessionManager.update_session_data_field(session_id, "data.additional_details", additional_details)
                         # Skip asking for organization name, go directly to workplace pincode
                         update_collection_step("workplace_pincode")
-                        return f"""Treatment reason noted: {message.strip()}
+                        return f"""
 
 What is the workplace/office pincode? (This is different from your home address pincode)
 Please enter 6 digits:"""
@@ -2660,13 +2658,13 @@ Please enter 6 digits:"""
                         # If not found, ask for organization name as usual
                         additional_details["organization_name"] = ""  # Initialize organization name
                         update_collection_step("organization_name")
-                        return f"""Treatment reason noted: {message.strip()}
+                        return f"""
 
 What is the Organization Name where the patient works?"""
                 else:
                     additional_details["business_name"] = ""  # Initialize business name
                     update_collection_step("business_name")
-                    return f"""Treatment reason noted: {message.strip()}
+                    return f"""
 
 What is the Business Name of the patient?"""
             
@@ -2679,7 +2677,7 @@ What is the Business Name of the patient?"""
                 
                 # Update collection step to ask for workplace pincode
                 update_collection_step("workplace_pincode")
-                return f"""Organization name noted: {message.strip()}
+                return f"""
 
 What is the workplace/office pincode? (This is different from your home address pincode - we need the pincode where you work)
 Please enter 6 digits:"""
@@ -2693,7 +2691,7 @@ Please enter 6 digits:"""
                 
                 # Update collection step to ask for workplace pincode
                 update_collection_step("workplace_pincode")
-                return f"""Business name noted: {message.strip()}
+                return f"""
 
 What is your business location pincode? (This is different from your home address pincode - we need the pincode where your business is located)
 Please enter 6 digits:"""
@@ -2826,11 +2824,11 @@ Please enter 6 digits:"""
                 
                 # Only show link if not rejected
                 if decision_status == "REJECTED":
-                    return f"""Workplace pincode noted: {pincode}
+                    return f"""
 
 Thank you! Your application is now complete. Your Loan application decision: {decision_status}."""
                 else:
-                    return f"""Workplace pincode noted: {pincode}
+                    return f"""
              
 Thank you! Your application is now complete. Loan application decision: {decision_status}. 
 Please check your application status by visiting the following:
