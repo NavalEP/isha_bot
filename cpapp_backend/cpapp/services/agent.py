@@ -2530,12 +2530,17 @@ please Enter input 1 or 2 only"""
             # Handle marital status input
             elif collection_step == "marital_status":
                 # Check for both number and word inputs
-                if "1" in message or "married" in message.lower():
+                message_lower = message.lower().strip()
+                
+                # Check for exact number matches first
+                if message.strip() == "1" or message_lower == "married":
                     additional_details["marital_status"] = "1"
                     selected_option = "Married"
-                elif "2" in message or "unmarried" in message.lower() or "single" in message.lower():
+                    logger.info(f"Marital status input: message='{message}', stored_value='1', selected_option='{selected_option}'")
+                elif message.strip() == "2" or message_lower in ["unmarried", "single", "unmarried/single"]:
                     additional_details["marital_status"] = "2"
                     selected_option = "Unmarried/Single"
+                    logger.info(f"Marital status input: message='{message}', stored_value='2', selected_option='{selected_option}'")
                 else:
                     return "Please select a valid option for Marital Status: 1. Married or 2. Unmarried/Single"
                 
@@ -3037,6 +3042,7 @@ Please check your application status by visiting the following:
                     "1": "Yes",
                     "2": "No"
                 }
+                logger.info(f"Processing marital status: raw_value='{additional_details['marital_status']}', mapped_value='{marital_status_map.get(additional_details['marital_status'], additional_details['marital_status'])}'")
                 basic_details["maritalStatus"] = marital_status_map.get(additional_details["marital_status"], additional_details["marital_status"])
             
             # Map education qualification to appropriate values
@@ -4067,6 +4073,7 @@ Please Enter input 1 or 2 only"""
             # Format marital status to correct API format
             formatted_marital_status = self._format_marital_status(marital_status)
             logger.info(f"Formatted marital status: '{marital_status}' -> '{formatted_marital_status}'")
+            logger.info(f"Input type: {type(marital_status)}, Input value: '{marital_status}'")
 
             # Prepare data for API
             details = {
@@ -4478,23 +4485,30 @@ Please Enter input 1 or 2 only"""
         Returns:
             Formatted marital status for API
         """
+        logger.info(f"_format_marital_status called with: '{marital_status}'")
+        
         if not marital_status:
+            logger.info("Empty marital status, returning 'No'")
             return "No"
         
         # Convert to lowercase for easier comparison
         status_lower = marital_status.lower().strip()
+        logger.info(f"Lowercase status: '{status_lower}'")
         
         # Map various inputs to correct API format
         married_variants = ["married", "yes", "1", "marriage"]
-        unmarried_variants = ["unmarried", "single", "no", "2", "unmarried/single", "unmarried/single", "unmarried or single"]
+        unmarried_variants = ["unmarried", "single", "no", "2", "unmarried/single", "unmarried or single"]
         
         if status_lower in married_variants:
+            logger.info(f"Matched married variant: '{status_lower}' -> 'Yes'")
             return "Yes"
         elif status_lower in unmarried_variants:
+            logger.info(f"Matched unmarried variant: '{status_lower}' -> 'No'")
             return "No"
         else:
             # If it's already in correct format, return as-is
             if marital_status in ["Yes", "No"]:
+                logger.info(f"Already in correct format: '{marital_status}'")
                 return marital_status
             # Default to "No" for unrecognized values
             logger.warning(f"Unrecognized marital status: '{marital_status}', defaulting to 'No'")
