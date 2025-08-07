@@ -3749,7 +3749,7 @@ Please Enter input 1 or 2 only"""
                 if not doctor_mapped_with_fibe:
                     return f"""Dear {patient_name}! Your loan Application is **REJECTED**.\n\n
 
-Now you explore No cost EMI on CI/DC above green button.\n\n
+Now you explore No cost EMI on Credit or Debit Card above green button.\n\n
 
 Try new inquiry by your family member Number for patient treatment.\n\n"""
                 else:
