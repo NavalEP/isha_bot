@@ -151,6 +151,8 @@ class CarepayAgent:
            - If user responds with "Successfully processed Aadhaar document and saved details.":
              - IMMEDIATELY proceed to PAN card collection. Do NOT ask for Aadhaar upload again.
              - Respond: "Great! Your Aadhaar card has been processed successfully. Now, please provide your PAN card details. You can either:\n\n**Upload your PAN card** by clicking the file upload button below\n\n**Enter your PAN card number manually** (10-character alphanumeric code like ABCDE1234F)\n\nPlease choose your preferred option to continue with the loan application process."
+           - If user does NOT respond with "Successfully processed Aadhaar document and saved details.":
+             - Ask again: "To continue with your loan application, please upload your Aadhaar card. You can upload it by clicking the file upload button below."
 
         3. **PAN Card Collection**
            - When user provides PAN card number (10-character alphanumeric):
@@ -2211,6 +2213,7 @@ CRITICAL CONTEXT AWARENESS RULES:
         Extract address information from prefill data and save it using save_address_details.
         Looks for 'Primary' address type and extracts postal code (pincode) and address line.
         If pincode is available, calls state_and_city_by_pincode API to get accurate city and state.
+        If state is not found from API, use state from prefill data, but if it's a code, crosswalk to real state name using pincode.
 
         Args:
             input_str: JSON string with userId or userId and prefill_data
@@ -2219,6 +2222,104 @@ CRITICAL CONTEXT AWARENESS RULES:
             Save result as JSON string
         """
         user_id = None  # Ensure user_id is always defined
+
+        # State code to state name mapping with pincode ranges
+        PINCODE_STATE_MAP = [
+            ("Andaman & Nicobar Islands", ["744"]),
+            ("Andhra Pradesh", [str(i) for i in range(500, 536)]),
+            ("Arunachal Pradesh", [str(i) for i in range(790, 793)]),
+            ("Assam", [str(i) for i in range(781, 789)]),
+            ("Bihar", [str(i) for i in range(800, 856)]),
+            ("Chhattisgarh", [str(i) for i in range(490, 498)]),
+            ("Chandigarh", ["160"]),
+            ("Daman & Diu", ["362", "396"]),
+            ("Delhi", ["110"]),
+            ("Dadra & Nagar Haveli", ["396"]),
+            ("Goa", ["403"]),
+            ("Gujarat", [str(i) for i in range(360, 397)]),
+            ("Himachal Pradesh", [str(i) for i in range(171, 178)]),
+            ("Haryana", [str(i) for i in range(121, 137)]),
+            ("Jharkhand", [str(i) for i in range(813, 836)]),
+            ("Jammu & Kashmir", [str(i) for i in range(180, 195)]),
+            ("Karnataka", [str(i) for i in range(560, 592)]),
+            ("Kerala", [str(i) for i in range(670, 696)]),
+            ("Lakshadweep", ["682"]),
+            ("Maharashtra", [str(i) for i in range(400, 446)]),
+            ("Meghalaya", [str(i) for i in range(793, 795)]),
+            ("Manipur", ["795"]),
+            ("Madhya Pradesh", [str(i) for i in range(450, 489)]),
+            ("Mizoram", ["796"]),
+            ("Nagaland", ["797", "798"]),
+            ("Odisha", [str(i) for i in range(751, 771)]),
+            ("Punjab", [str(i) for i in range(140, 161)]),
+            ("Pondicherry/Puducherry", ["533", "605", "607", "609"]),
+            ("Rajasthan", [str(i) for i in range(301, 346)]),
+            ("Sikkim", ["737"]),
+            ("Telangana", [str(i) for i in range(500, 510)]),
+            ("Tamil Nadu", [str(i) for i in range(600, 644)]),
+            ("Tripura", ["799"]),
+            ("Uttarakhand", [str(i) for i in range(244, 264)]),
+            ("Uttar Pradesh", [str(i) for i in range(201, 286)]),
+            ("West Bengal", [str(i) for i in range(700, 744)]),
+        ]
+
+        STATE_CODE_TO_NAME = {
+            "AN": "Andaman & Nicobar Islands",
+            "AP": "Andhra Pradesh",
+            "AR": "Arunachal Pradesh",
+            "AS": "Assam",
+            "BR": "Bihar",
+            "CG": "Chhattisgarh",
+            "CT": "Chhattisgarh",
+            "CH": "Chandigarh",
+            "DD": "Daman & Diu",
+            "DL": "Delhi",
+            "DN": "Dadra & Nagar Haveli",
+            "GA": "Goa",
+            "GJ": "Gujarat",
+            "HP": "Himachal Pradesh",
+            "HR": "Haryana",
+            "JH": "Jharkhand",
+            "JK": "Jammu & Kashmir",
+            "KA": "Karnataka",
+            "KL": "Kerala",
+            "LD": "Lakshadweep",
+            "MH": "Maharashtra",
+            "ML": "Meghalaya",
+            "MN": "Manipur",
+            "MP": "Madhya Pradesh",
+            "MZ": "Mizoram",
+            "NL": "Nagaland",
+            "OR": "Odisha",
+            "PB": "Punjab",
+            "PY": "Pondicherry/Puducherry",
+            "RJ": "Rajasthan",
+            "SK": "Sikkim",
+            "TG": "Telangana",
+            "TS": "Telangana",
+            "TN": "Tamil Nadu",
+            "TR": "Tripura",
+            "UL": "Uttarakhand",
+            "UP": "Uttar Pradesh",
+            "WB": "West Bengal",
+        }
+
+        def get_state_from_pincode(pincode):
+            if not pincode or len(pincode) < 3:
+                return None
+            prefix = pincode[:3]
+            for state_name, ranges in PINCODE_STATE_MAP:
+                for rng in ranges:
+                    if "-" in rng:
+                        start, end = rng.split("-")
+                        if start.strip().isdigit() and end.strip().isdigit():
+                            if int(start) <= int(prefix) <= int(end):
+                                return state_name
+                    else:
+                        if prefix == rng:
+                            return state_name
+            return None
+
         try:
             if not session_id:
                 return "Session ID is required"
@@ -2282,6 +2383,7 @@ CRITICAL CONTEXT AWARENESS RULES:
                                 pincode_data = self.api_client.state_and_city_by_pincode(address_data["pincode"])
                                 logger.info(f"Pincode API response for pincode {address_data['pincode']}: {pincode_data}")
                                 city_set = False
+                                state_set = False
                                 if pincode_data and pincode_data.get("status") == "success":
                                     # Only update if we get valid non-null data
                                     if pincode_data.get("city") and pincode_data["city"] is not None:
@@ -2289,6 +2391,30 @@ CRITICAL CONTEXT AWARENESS RULES:
                                         city_set = True
                                     if pincode_data.get("state") and pincode_data["state"] is not None:
                                         address_data["state"] = pincode_data["state"]
+                                        state_set = True
+                                # If state is not set from API, use state from prefill data, but crosswalk code if needed
+                                if not state_set:
+                                    prefill_state = primary_address.get("State", "")
+                                    # If prefill_state is a code, map to name
+                                    state_name = STATE_CODE_TO_NAME.get(prefill_state.strip().upper())
+                                    if state_name:
+                                        address_data["state"] = state_name
+                                    else:
+                                        # If not a code, try to use as is, but if still not a valid state, use pincode mapping
+                                        if prefill_state and len(prefill_state) <= 3:
+                                            # Try pincode mapping
+                                            state_from_pin = get_state_from_pincode(address_data["pincode"])
+                                            if state_from_pin:
+                                                address_data["state"] = state_from_pin
+                                            else:
+                                                address_data["state"] = prefill_state
+                                        elif prefill_state:
+                                            address_data["state"] = prefill_state
+                                        else:
+                                            # As last resort, use pincode mapping
+                                            state_from_pin = get_state_from_pincode(address_data["pincode"])
+                                            if state_from_pin:
+                                                address_data["state"] = state_from_pin
                                 # If city is not set from API, use last word of address as city
                                 if not city_set:
                                     address_str = address_data.get("address", "")
@@ -2296,7 +2422,8 @@ CRITICAL CONTEXT AWARENESS RULES:
                                         # Split address by whitespace and take last word
                                         address_words = address_str.strip().split()
                                         if address_words:
-                                            address_data["city"] = address_words[-1]
+                                            # Save city in title case
+                                            address_data["city"] = address_words[-1].title()
                             except Exception as e:
                                 logger.warning(f"Failed to get city/state from pincode API: {e}")
                                 # If API call fails, try to set city from address as fallback
@@ -2304,7 +2431,18 @@ CRITICAL CONTEXT AWARENESS RULES:
                                 if address_str:
                                     address_words = address_str.strip().split()
                                     if address_words:
-                                        address_data["city"] = address_words[-1]
+                                        address_data["city"] = address_words[-1].title()
+                                # For state, use prefill state or pincode mapping
+                                prefill_state = primary_address.get("State", "")
+                                state_name = STATE_CODE_TO_NAME.get(prefill_state.strip().upper())
+                                if state_name:
+                                    address_data["state"] = state_name
+                                else:
+                                    state_from_pin = get_state_from_pincode(address_data["pincode"])
+                                    if state_from_pin:
+                                        address_data["state"] = state_from_pin
+                                    elif prefill_state:
+                                        address_data["state"] = prefill_state
 
                     logger.info(f"Extracted address data: {address_data}")
 
@@ -3559,7 +3697,7 @@ Continue your journey with the link here:
                     except (ValueError, TypeError):
                         down_payment = 0
                     
-                    return f"""### Loan Application Decision:
+                    return f"""### Loan Application Decision: **APPROVED**
 
 🎉 Congratulations, {patient_name}! Your loan application has been **APPROVED**.
 
@@ -3581,7 +3719,7 @@ Please Enter input 1 or 2 only"""
                     except (ValueError, TypeError):
                         credit_limit = 0
                     
-                    return f"""### Loan Application Decision:
+                    return f"""### Loan Application Decision: **APPROVED**
 
 🎉 Congratulations, {patient_name}! Your loan application has been **APPROVED**.
 
@@ -3591,7 +3729,31 @@ What is the Employment Type of the patient?
 Please Enter input 1 or 2 only"""
             
             elif status and status.upper() == "REJECTED":
-                return f"""Dear {patient_name}! Your application is still not Approved. We need 5 more information so that we can check your eligibility for a loan application.
+                # Check if doctor is mapped with FIBE
+                doctor_id = session["data"].get("doctorId") or session["data"].get("doctor_id")
+                doctor_mapped_with_fibe = False
+                
+                if doctor_id:
+                    try:
+                        if hasattr(self.api_client, 'check_doctor_mapped_by_nbfc'):
+                            check_doctor_mapped_by_nbfc_response = self.api_client.check_doctor_mapped_by_nbfc(doctor_id)
+                            logger.info(f"Session {session_id}: Check doctor mapped by FIBE response for REJECTED status - doctor_id {doctor_id}: {json.dumps(check_doctor_mapped_by_nbfc_response)}")
+                            
+                            if check_doctor_mapped_by_nbfc_response.get("status") == 200:
+                                doctor_mapped_by_nbfc = check_doctor_mapped_by_nbfc_response.get("data")
+                                doctor_mapped_with_fibe = (doctor_mapped_by_nbfc == "true")
+                                logger.info(f"Session {session_id}: Doctor {doctor_id} mapped with FIBE: {doctor_mapped_with_fibe}")
+                    except Exception as e:
+                        logger.error(f"Session {session_id}: Exception during doctor mapping check for REJECTED status - doctor_id {doctor_id}: {e}", exc_info=True)
+                
+                if not doctor_mapped_with_fibe:
+                    return f"""Dear {patient_name}! Your loan Application is **REJECTED**.\n\n
+
+Now you explore No cost EMI on CI/DC above green button.\n\n
+
+Try new inquiry by your family member Number for patient treatment.\n\n"""
+                else:
+                    return f"""Dear {patient_name}! Your application is still not Approved. We need 5 more information so that we can check your eligibility for a loan application.
 What is the Employment Type of the patient?
 1. SALARIED
 2. SELF_EMPLOYED
