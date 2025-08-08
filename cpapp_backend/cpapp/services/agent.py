@@ -134,6 +134,7 @@ class CarepayAgent:
         - NEVER stop after process_prefill_data; always continue to get_bureau_decision.
         - NEVER mix Workflow A and Workflow B.
         - NEVER ask for Aadhaar upload if get_prefill_data returns status 200 or if Aadhaar is already processed.
+        - Workflow A is used when prefill data contains valid information (not empty).
         - Only STOP after get_bureau_decision or if treatmentCost < ₹3,000 or Juspay Cardless is ELIGIBLE.
         - CRITICAL: After calling save_gender_details (or any other missing details tool), proceed directly to pan_verification, employment_verification, save_employment_details, and get_bureau_decision. Do NOT call save_basic_details again.
 
@@ -141,7 +142,7 @@ class CarepayAgent:
 
         ## Workflow B: Aadhaar Upload Flow
 
-        This workflow is followed ONLY when `get_prefill_data` returns status 500 with error "phoneToPrefill_failed".
+        This workflow is followed ONLY when `get_prefill_data` returns status 500 with error "phoneToPrefill_failed" OR when prefill data is empty (all important fields like pan, name, income, gender, age, dob are empty).
 
         1. **Aadhaar Upload Request**
            - Respond: "To continue with your loan application, please upload your Aadhaar card. You can upload it by clicking the file upload button below."
@@ -185,6 +186,7 @@ class CarepayAgent:
         **CRITICAL RULES FOR WORKFLOW B:**
         - NEVER ask for Aadhaar upload again after it is processed.
         - NEVER mix Workflow B with Workflow A.
+        - Workflow B is used when prefill data is empty or when phoneToPrefill API fails.
         - Do NOT wait for user input after email is saved and continue_chain is True; execute the remaining steps automatically.
         - ALWAYS use the exact formatted responses from tools.
 
@@ -305,6 +307,7 @@ CRITICAL CONTEXT AWARENESS RULES:
 9. NEVER mix Workflow A and Workflow B - stick to the current workflow
 10. Continue from where you left off based on the current step in the workflow
 11. CRITICAL: After missing details collection is complete, proceed to the next workflow step (PAN verification, employment verification, etc.) - DO NOT restart the workflow
+12. Workflow B is triggered when prefill data is empty (all important fields are empty) or when phoneToPrefill API fails
 
 """
             return enhanced_prompt
@@ -424,10 +427,10 @@ CRITICAL CONTEXT AWARENESS RULES:
             if data.get("aadhaar_uploaded"):
                 return "Workflow A"
             
-            # Check if get_prefill_data returned status 500 with phoneToPrefill_failed
+            # Check if get_prefill_data returned status 500 with phoneToPrefill_failed or empty data
             for msg in history:
                 content = msg.get("content", "")
-                if "phoneToPrefill_failed" in content:
+                if "phoneToPrefill_failed" in content or "phoneToPrefill_empty_data" in content:
                     return "Workflow B"
             
             # Default to Workflow A
@@ -1497,6 +1500,40 @@ CRITICAL CONTEXT AWARENESS RULES:
                     "message": "Please upload your Aadhaar card to continue with the loan application process.",
                     "requires_aadhaar_upload": True
                 })
+            
+            # Check if the API call was successful but returned empty data
+            if result.get("status") == 200:
+                data = result.get("data", {})
+                response_data = data.get("response", {})
+                
+                # Check if all important fields are empty
+                is_empty = True
+                if response_data:
+                    # Check if any of the important fields have data
+                    important_fields = ["pan", "gender", "dob", "email"]
+                    for field in important_fields:
+                        field_value = response_data.get(field, "")
+                        if field_value and str(field_value).strip():
+                            # For nested name object, check if any name field has data
+                            if field == "name" and isinstance(field_value, dict):
+                                name_fields = ["fullName", "firstName", "lastName"]
+                                for name_field in name_fields:
+                                    if field_value.get(name_field, "").strip():
+                                        is_empty = False
+                                        break
+                            else:
+                                is_empty = False
+                                break
+                
+                if is_empty:
+                    logger.warning(f"phoneToPrefill API returned empty data for user_id: {user_id}")
+                    # Return a specific message asking for Aadhaar upload
+                    return json.dumps({
+                        "status": 500,
+                        "error": "phoneToPrefill_empty_data",
+                        "message": "To continue with your loan application, please upload your Aadhaar card. You can upload it by clicking the file upload button below.",
+                        "requires_aadhaar_upload": True
+                    })
             
             return json.dumps(result)
         except Exception as e:

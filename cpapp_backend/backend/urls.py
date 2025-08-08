@@ -29,7 +29,7 @@ urlpatterns = [
     path('api/v1/agent/', include('cpapp.urls')),
     # Serve images directly from static directory
     path('images/<path:path>', serve, {'document_root': os.path.join(settings.STATICFILES_DIRS[0], 'images')}),
-    path('favicon.svg', serve, {'document_root': settings.STATICFILES_DIRS[0], 'path': 'favicon.svg'}),
+    path('images/Favicon@1.5x.png', serve, {'document_root': settings.STATICFILES_DIRS[0], 'path': 'images/Favicon@1.5x.png'}),
     # Serve static assets with proper MIME types
     path('static/<path:path>', serve, {'document_root': settings.STATICFILES_DIRS[0]}),
 ]
