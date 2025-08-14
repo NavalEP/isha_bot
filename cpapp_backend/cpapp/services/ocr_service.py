@@ -82,6 +82,17 @@ def extract_aadhaar_details(image_path: str) -> dict:
         Dictionary containing extracted Aadhaar details
     """
     try:
+        # Check if image file exists and is readable
+        if not os.path.exists(image_path):
+            logger.error(f"Aadhaar image file not found: {image_path}")
+            raise Exception(f"Aadhaar image file not found: {image_path}")
+        
+        # Check file size (should be reasonable for an image)
+        file_size = os.path.getsize(image_path)
+        if file_size == 0:
+            logger.error(f"Aadhaar image file is empty: {image_path}")
+            raise Exception(f"Aadhaar image file is empty: {image_path}")
+        
         # Read and encode the image
         with open(image_path, "rb") as f:
             base64_image = base64.b64encode(f.read()).decode("utf-8")
@@ -92,7 +103,7 @@ def extract_aadhaar_details(image_path: str) -> dict:
             messages=[
                 {"role": "system", "content": "You are an expert in extracting ID information. Extract all details accurately and return in JSON format. Pay special attention to separating relationship information from address."},
                 {"role": "user", "content": [
-                    {"type": "text", "text": "Extract the following details from the Aadhaar card image and return as JSON: full_name, aadhaar_number(12 digits with no spaces), date_of_birth(usally find DD/MM/YYYY format)( save in YYYY-MM-DD format), gender, address, pincode, father_name, husband_name. For the address field, exclude relationship prefixes like 'S/O', 'W/O', 'D/O', 'H/O' - these should go in father_name or husband_name fields. The address should only contain the actual location details (village, post office, district, etc.). Extract the pincode as a separate field - look for 6-digit numbers that appear at the end of address lines or near postal information. Return only valid JSON without any additional text."},
+                    {"type": "text", "text": "Extract the following details from the Aadhaar card image and return as JSON: full_name, aadhaar_number(12 digits with no spaces), date_of_birth(usally find DD/MM/YYYY format)( save in YYYY-MM-DD format), gender(Male or Female), address, pincode, father_name, husband_name. For the address field, exclude relationship prefixes like 'S/O', 'W/O', 'D/O', 'H/O' - these should go in father_name or husband_name fields. The address should only contain the actual location details (village, post office, district, etc.). Extract the pincode as a separate field - look for 6-digit numbers that appear at the end of address lines or near postal information. Return only valid JSON without any additional text."},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                 ]}
             ],
@@ -102,11 +113,21 @@ def extract_aadhaar_details(image_path: str) -> dict:
         # Parse and return the result
         content = response.choices[0].message.content.strip()
         
+        # Check if the response indicates an error or inability to process
+        if "unable to extract" in content.lower() or "unable to process" in content.lower():
+            logger.error(f"OCR API unable to process image: {content}")
+            raise Exception(f"OCR API unable to process image: {content}")
+        
         # Remove markdown formatting if present
         if content.startswith('```json'):
             content = content.replace('```json', '').replace('```', '').strip()
         elif content.startswith('```'):
             content = content.replace('```', '').strip()
+        
+        # Validate that content looks like JSON
+        if not content.startswith('{') or not content.endswith('}'):
+            logger.error(f"Response is not valid JSON format: {content}")
+            raise Exception(f"Response is not valid JSON format: {content}")
         
         result = json.loads(content)
         
@@ -179,6 +200,17 @@ def extract_pan_details(image_path: str) -> dict:
         Dictionary containing extracted PAN details
     """
     try:
+        # Check if image file exists and is readable
+        if not os.path.exists(image_path):
+            logger.error(f"PAN image file not found: {image_path}")
+            raise Exception(f"PAN image file not found: {image_path}")
+        
+        # Check file size (should be reasonable for an image)
+        file_size = os.path.getsize(image_path)
+        if file_size == 0:
+            logger.error(f"PAN image file is empty: {image_path}")
+            raise Exception(f"PAN image file is empty: {image_path}")
+        
         # Read and encode the image
         with open(image_path, "rb") as f:
             base64_image = base64.b64encode(f.read()).decode("utf-8")
@@ -189,7 +221,7 @@ def extract_pan_details(image_path: str) -> dict:
             messages=[
                 {"role": "system", "content": "You are an expert in extracting PAN card information. Extract all details accurately and return in JSON format."},
                 {"role": "user", "content": [
-                    {"type": "text", "text": "Extract the following details from the PAN card image and return as JSON: pan_card_number, person_name, date_of_birth(YYYY-MM-DD), gender, father_name. The PAN card number should be in the format XXXXX1234X (10 characters). The person_name should be the full name of the card holder. The date of birth should be in DD/MM/YYYY format. Gender should be MALE or FEMALE. Father's name should be the full name as shown on the card. Return only valid JSON without any additional text."},
+                    {"type": "text", "text": "Extract the following details from the PAN card image and return as JSON: pan_card_number, person_name, date_of_birth(YYYY-MM-DD), father_name. The PAN card number should be in the format XXXXX1234X (10 characters). The person_name should be the full name of the card holder. The date of birth should be in DD/MM/YYYY format. Father's name should be the full name as shown on the card. Return only valid JSON without any additional text."},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                 ]}
             ],
@@ -199,11 +231,21 @@ def extract_pan_details(image_path: str) -> dict:
         # Parse and return the result
         content = response.choices[0].message.content.strip()
         
+        # Check if the response indicates an error or inability to process
+        if "unable to extract" in content.lower() or "unable to process" in content.lower():
+            logger.error(f"OCR API unable to process PAN card image: {content}")
+            raise Exception(f"OCR API unable to process PAN card image: {content}")
+        
         # Remove markdown formatting if present
         if content.startswith('```json'):
             content = content.replace('```json', '').replace('```', '').strip()
         elif content.startswith('```'):
             content = content.replace('```', '').strip()
+        
+        # Validate that content looks like JSON
+        if not content.startswith('{') or not content.endswith('}'):
+            logger.error(f"PAN card response is not valid JSON format: {content}")
+            raise Exception(f"PAN card response is not valid JSON format: {content}")
         
         result = json.loads(content)
         
@@ -212,7 +254,6 @@ def extract_pan_details(image_path: str) -> dict:
             'pan_card_number': result.get('pan_card_number', ''),
             'person_name': result.get('person_name', ''),
             'date_of_birth': result.get('date_of_birth', ''),
-            'gender': result.get('gender', ''),
             'father_name': result.get('father_name', '')
         }
         
