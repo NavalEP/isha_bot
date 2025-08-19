@@ -4,6 +4,10 @@ from cpapp.api.chat.views import ChatSessionView, ChatMessageView, SessionDetail
 from cpapp.api.login.views import SendOtpView, VerifyOtpView, DoctorStaffView
 from cpapp.api.document.views import AadhaarUploadView, PanCardUploadView
 from cpapp.api.treatment.views import TreatmentSearchView, TreatmentCategoriesView
+from cpapp.api.loan.views import (
+    GetQrCodeView, ActivitiesLogView, AssignedProductView, BureauDecisionView,
+    DisburseDetailReportView, UploadDocumentsView, LoanTransactionsView, MatchingEmiPlansView
+)
 
 
 def api_root_view(request):
@@ -26,4 +30,14 @@ urlpatterns = [
     path('documents/upload-pan/', PanCardUploadView.as_view(), name='pan_card_upload'),
     path('treatments/search/', TreatmentSearchView.as_view(), name='treatment_search'),
     path('treatments/categories/', TreatmentCategoriesView.as_view(), name='treatment_categories'),
+    
+    # Loan API endpoints
+    path('getQrCode/', GetQrCodeView.as_view(), name='get_qr_code'),
+    path('activitiesLog/', ActivitiesLogView.as_view(), name='activities_log'),
+    path('userDetails/getAssignedProductByUserId/', AssignedProductView.as_view(), name='assigned_product'),
+    path('bureauDecisionNew/', BureauDecisionView.as_view(), name='bureau_decision'),
+    path('getDisburseDetailForReport/', DisburseDetailReportView.as_view(), name='disburse_detail_report'),
+    path('uploadDocuments/', UploadDocumentsView.as_view(), name='upload_documents'),
+    path('getAllLoanDetailForDoctorNew/', LoanTransactionsView.as_view(), name='loan_transactions'),
+    path('matchingEmiPlans/', MatchingEmiPlansView.as_view(), name='matching_emi_plans'),
 ]
