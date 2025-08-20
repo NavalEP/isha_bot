@@ -71,7 +71,8 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # 'django.middleware.clickjacking.XFrameOptionsMiddleware',  # Commented out to allow iframe embedding
+    'cpapp.middleware.IframeEmbeddingMiddleware',  # Custom middleware for iframe embedding
 ]
 
 ROOT_URLCONF = 'backend.urls'
@@ -216,6 +217,18 @@ CORS_ALLOW_HEADERS = [
 # cors_headers_str = os.getenv('CORS_ALLOW_HEADERS', '')
 # if cors_headers_str:
 #     CORS_ALLOW_HEADERS = [header.strip().lower() for header in cors_headers_str.split(',')]
+
+# Security settings for iframe embedding
+# Allow the application to be embedded in iframes from any domain
+X_FRAME_OPTIONS = 'ALLOWALL'
+
+# Content Security Policy settings
+# Allow frame-ancestors from any domain
+CSP_FRAME_ANCESTORS = ("'self'", "*")
+
+# Additional security headers (optional - for better iframe support)
+SECURE_BROWSER_XSS_FILTER = False  # Disable XSS filter for iframe compatibility
+SECURE_CONTENT_TYPE_NOSNIFF = False  # Disable content type sniffing for iframe compatibility
 
 # REST Framework settings
 REST_FRAMEWORK = {

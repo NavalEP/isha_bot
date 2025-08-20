@@ -3,6 +3,7 @@ from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework import status
 from cpapp.services.loan_api_client import LoanAPIClient
@@ -161,6 +162,7 @@ class DisburseDetailReportView(BaseLoanAPIView):
 class UploadDocumentsView(APIView):
     """Upload documents (prescriptions, etc.)"""
     
+    parser_classes = (MultiPartParser, FormParser)
     authentication_classes = []  # Disable authentication for file uploads
     permission_classes = []  # Disable permissions
     
@@ -233,23 +235,20 @@ class LoanTransactionsView(BaseLoanAPIView):
     """Get loan transactions for doctor"""
     
     def get(self, request):
-        doctor_id = request.GET.get('doctorId')
-        if not doctor_id:
-            return Response({
-                'status': 400,
-                'message': 'doctorId parameter is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Get optional parameters
+        doctor_id = request.GET.get('doctorId', '')
+        parent_doctor_id = request.GET.get('parentDoctorId', '')
         clinic_name = request.GET.get('clinicName', '')
         start_date = request.GET.get('startDate', '')
         end_date = request.GET.get('endDate', '')
+        loan_status = request.GET.get('loanStatus', '')
         
         result = self.api_client.get_loan_transactions(
             doctor_id=doctor_id,
+            parent_doctor_id=parent_doctor_id,
             clinic_name=clinic_name,
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            loan_status=loan_status
         )
         
         if result and result.get('status') == 200:
@@ -261,11 +260,11 @@ class LoanTransactionsView(BaseLoanAPIView):
             })
         
         return Response({
-            'status': 500,
+            'status': 404,
             'data': [],
             'attachment': None,
-            'message': result.get('message', 'Failed to fetch loan transactions')
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            'message': result.get('message', 'No loan transactions found')
+        }, status=status.HTTP_404_NOT_FOUND)
 
 class MatchingEmiPlansView(BaseLoanAPIView):
     """Get matching EMI plans for user and loan"""
@@ -303,3 +302,106 @@ class MatchingEmiPlansView(BaseLoanAPIView):
                 'attachment': None,
                 'message': 'Failed to get matching EMI plans'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class LoanCountAndAmountView(BaseLoanAPIView):
+    """Get loan count and amount statistics for doctor"""
+    
+    def get(self, request):
+        doctor_id = request.GET.get('doctorId')
+        if not doctor_id:
+            return Response({
+                'status': 400,
+                'message': 'doctorId parameter is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get optional clinic name parameter
+        clinic_name = request.GET.get('clinicName', '')
+        
+        result = self.api_client.get_loan_count_and_amount_for_doctor(
+            doctor_id=doctor_id,
+            clinic_name=clinic_name
+        )
+        
+        if result and result.get('status') == 200:
+            return Response({
+                'status': 200,
+                'data': result.get('data', {}),
+                'attachment': None,
+                'message': 'Loan count and amount statistics retrieved successfully'
+            })
+        
+        return Response({
+            'status': 500,
+            'data': {
+                'total_loan_amount': 0,
+                'pending_count': 0,
+                'expired_count': 0,
+                'total_applied': 0,
+                'expired_amount': 0,
+                'disbursed_count': 0,
+                'approved_amount': 0,
+                'rejected_amount': 0,
+                'disbursed_amount': 0,
+                'rejected_count': 0,
+                'approved_count': 0,
+                'pending_amount': 0
+            },
+            'attachment': None,
+            'message': result.get('message', 'Failed to fetch loan count and amount statistics')
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class UserLoanStatusView(BaseLoanAPIView):
+    """Get user loan status"""
+    
+    def get(self, request):
+        loan_id = request.GET.get('loanId')
+        if not loan_id:
+            return Response({
+                'status': 400,
+                'message': 'loanId parameter is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        result = self.api_client.get_user_loan_status(loan_id)
+        
+        if result and result.get('status') == 200:
+            return Response({
+                'status': 200,
+                'data': result.get('data', []),
+                'attachment': None,
+                'message': 'User loan status retrieved successfully'
+            })
+        
+        return Response({
+            'status': 500,
+            'data': [],
+            'attachment': None,
+            'message': result.get('message', 'Failed to fetch user loan status')
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class GetAllChildClinicsView(BaseLoanAPIView):
+    """Get all child clinics for a doctor"""
+    
+    def get(self, request):
+        doctor_id = request.GET.get('doctorId')
+        if not doctor_id:
+            return Response({
+                'status': 400,
+                'message': 'doctorId parameter is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        result = self.api_client.get_all_child_clinics(doctor_id)
+        
+        if result and result.get('status') == 200:
+            return Response({
+                'status': 200,
+                'data': result.get('data', []),
+                'attachment': None,
+                'message': 'Child clinics retrieved successfully'
+            })
+        
+        return Response({
+            'status': 500,
+            'data': [],
+            'attachment': None,
+            'message': result.get('message', 'Failed to fetch child clinics')
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

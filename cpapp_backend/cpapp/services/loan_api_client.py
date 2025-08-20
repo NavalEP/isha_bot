@@ -40,6 +40,7 @@ class LoanAPIClient:
         """
         try:
             url = f"{self.base_url}/{endpoint}"
+            logger.info(f"Constructed URL: {url}")
             
             # Prepare request kwargs
             kwargs = {
@@ -50,26 +51,47 @@ class LoanAPIClient:
                 kwargs['params'] = params
             if data and method in ['POST', 'PUT', 'PATCH']:
                 if files:
+                    # For multipart requests, always send data as form data
                     kwargs['data'] = data
                 else:
                     kwargs['json'] = data
             if files:
                 kwargs['files'] = files
-                # Remove Content-Type header for multipart requests
-                headers = self.session.headers.copy()
-                headers.pop('Content-Type', None)
+                # For multipart requests, create headers without Content-Type
+                # Let requests automatically set the correct multipart Content-Type with boundary
+                headers = {k: v for k, v in self.session.headers.items() if k.lower() != 'content-type'}
                 kwargs['headers'] = headers
             
             logger.info(f"Making {method} request to {url}")
             logger.info(f"Request kwargs: {kwargs}")
+            if files:
+                logger.info(f"Files being sent: {list(files.keys())}")
+                for key, file_tuple in files.items():
+                    logger.info(f"File {key}: name={file_tuple[0]}, content_type={file_tuple[2] if len(file_tuple) > 2 else 'unknown'}")
             
             response = self.session.request(method, url, **kwargs)
             
             if response_type == 'blob':
                 return response
             
-            response.raise_for_status()
-            return response.json()
+            # Log response details for debugging
+            logger.info(f"Response status: {response.status_code}")
+            logger.info(f"Response headers: {dict(response.headers)}")
+            
+            try:
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"HTTP Error: {e}")
+                logger.error(f"Response content: {response.text}")
+                # Try to parse error response
+                try:
+                    error_data = response.json()
+                    logger.error(f"Error response JSON: {error_data}")
+                    return error_data
+                except:
+                    logger.error(f"Could not parse error response as JSON")
+                    return None
             
         except requests.exceptions.Timeout:
             logger.error(f"Request timeout for {endpoint}")
@@ -115,30 +137,90 @@ class LoanAPIClient:
     def upload_documents(self, file, user_id: str, file_type: str = 'img', 
                         file_name_param: str = 'treatmentProof') -> Optional[Dict]:
         """Upload documents"""
-        # Create files dict with the file object
-        files = {'file': (file.name, file, file.content_type)}
-        data = {
-            'type': file_type,
-            'userId': user_id,
-            'fileName': file_name_param
-        }
+        # Ensure file has required attributes
+        file_name = getattr(file, 'name', 'uploaded_file')
+        content_type = getattr(file, 'content_type', 'application/octet-stream')
         
-        logger.info(f"UploadDocuments: Sending file: {file.name}, size: {file.size}, content_type: {file.content_type}")
-        logger.info(f"UploadDocuments: Data: {data}")
+        # Ensure file is at the beginning
+        if hasattr(file, 'seek'):
+            file.seek(0)
         
-        return self._make_request("uploadDocuments", method='POST', data=data, files=files)
+        # Try base64 encoding approach first
+        try:
+            import base64
+            file_content = file.read()
+            base64_content = base64.b64encode(file_content).decode('utf-8')
+            
+            # Reset file pointer after reading
+            file.seek(0)
+            
+            # Send as JSON with base64 encoded file
+            data = {
+                'type': file_type,
+                'userId': user_id,
+                'fileName': file_name_param,
+                'document': base64_content,
+                'originalFileName': file_name,
+                'contentType': content_type
+            }
+            
+            logger.info(f"UploadDocuments: Sending file as base64: {file_name}, size: {len(file_content)} bytes, content_type: {content_type}")
+            logger.info(f"UploadDocuments: Data keys: {list(data.keys())}")
+            
+            return self._make_request("uploadDocuments/", method='POST', data=data, files=None)
+            
+        except Exception as e:
+            logger.error(f"Error encoding file as base64: {e}")
+            # Fallback to multipart method
+            files = {'document': (file_name, file, content_type)}
+            data = {
+                'type': file_type,
+                'userId': user_id,
+                'fileName': file_name_param
+            }
+            
+            logger.info(f"UploadDocuments: Fallback to multipart - Sending file: {file_name}, content_type: {content_type}")
+            return self._make_request("uploadDocuments/", method='POST', data=data, files=files)
     
-    def get_loan_transactions(self, doctor_id: str, clinic_name: str = '', 
-                            start_date: str = '', end_date: str = '') -> Optional[Dict]:
+    def get_loan_transactions(self, doctor_id: str, parent_doctor_id: str = '', clinic_name: str = '', 
+                            start_date: str = '', end_date: str = '', loan_status: str = '') -> Optional[Dict]:
         """Get loan transactions for doctor"""
         params = {
             'doctorId': doctor_id,
             'type': 'detail',
             'clinicName': clinic_name,
             'startDate': start_date,
-            'endDate': end_date
+            'endDate': end_date,
+            'loanStatus': loan_status
         }
+        
+        # Add parentDoctorId if provided
+        if parent_doctor_id:
+            params['parentDoctorId'] = parent_doctor_id
+            
         return self._make_request("getAllLoanDetailForDoctorNew", params=params)
+    
+    def get_loan_count_and_amount_for_doctor(self, doctor_id: str, clinic_name: str = '') -> Optional[Dict]:
+        """Get loan count and amount statistics for doctor"""
+        params = {
+            'doctorId': doctor_id,
+            'clinicName': clinic_name
+        }
+        return self._make_request("getLoanCountAndAmountForDoctor", params=params)
+    
+    def get_user_loan_status(self, loan_id: str) -> Optional[Dict]:
+        """Get user loan status"""
+        params = {
+            'loanId': loan_id
+        }
+        return self._make_request("status/getUserLoanStatus", params=params)
+    
+    def get_all_child_clinics(self, doctor_id: str) -> Optional[Dict]:
+        """Get all child clinics for a doctor"""
+        params = {
+            'doctorId': doctor_id
+        }
+        return self._make_request("getAllChildClinic", params=params)
     
     def get_matching_emi_plans(self, user_id: str, loan_id: str) -> Dict[str, Any]:
         """

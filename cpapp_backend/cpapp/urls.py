@@ -6,7 +6,8 @@ from cpapp.api.document.views import AadhaarUploadView, PanCardUploadView
 from cpapp.api.treatment.views import TreatmentSearchView, TreatmentCategoriesView
 from cpapp.api.loan.views import (
     GetQrCodeView, ActivitiesLogView, AssignedProductView, BureauDecisionView,
-    DisburseDetailReportView, UploadDocumentsView, LoanTransactionsView, MatchingEmiPlansView
+    DisburseDetailReportView, UploadDocumentsView, LoanTransactionsView, MatchingEmiPlansView,
+    LoanCountAndAmountView, UserLoanStatusView, GetAllChildClinicsView
 )
 
 
@@ -40,4 +41,7 @@ urlpatterns = [
     path('uploadDocuments/', UploadDocumentsView.as_view(), name='upload_documents'),
     path('getAllLoanDetailForDoctorNew/', LoanTransactionsView.as_view(), name='loan_transactions'),
     path('matchingEmiPlans/', MatchingEmiPlansView.as_view(), name='matching_emi_plans'),
+    path('getLoanCountAndAmountForDoctor/', LoanCountAndAmountView.as_view(), name='loan_count_and_amount'),
+    path('status/getUserLoanStatus/', UserLoanStatusView.as_view(), name='user_loan_status'),
+    path('getAllChildClinic/', GetAllChildClinicsView.as_view(), name='get_all_child_clinics'),
 ]
