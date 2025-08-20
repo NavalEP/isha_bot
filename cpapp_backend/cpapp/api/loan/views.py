@@ -206,7 +206,7 @@ class UploadDocumentsView(APIView):
                 logger.info("UploadDocumentsView: Upload successful")
                 return Response({
                     'status': 200,
-                    'data': result.get('data'),
+                    'data': result.get('data', ''),
                     'attachment': None,
                     'message': 'Document uploaded successfully'
                 })

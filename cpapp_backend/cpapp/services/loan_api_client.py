@@ -136,7 +136,7 @@ class LoanAPIClient:
     
     def upload_documents(self, file, user_id: str, file_type: str = 'img', 
                         file_name_param: str = 'treatmentProof') -> Optional[Dict]:
-        """Upload documents"""
+        """Upload documents - matches the curl command format exactly"""
         # Ensure file has required attributes
         file_name = getattr(file, 'name', 'uploaded_file')
         content_type = getattr(file, 'content_type', 'application/octet-stream')
@@ -145,42 +145,79 @@ class LoanAPIClient:
         if hasattr(file, 'seek'):
             file.seek(0)
         
-        # Try base64 encoding approach first
+        # Test file readability
         try:
-            import base64
-            file_content = file.read()
-            base64_content = base64.b64encode(file_content).decode('utf-8')
-            
-            # Reset file pointer after reading
-            file.seek(0)
-            
-            # Send as JSON with base64 encoded file
-            data = {
-                'type': file_type,
-                'userId': user_id,
-                'fileName': file_name_param,
-                'document': base64_content,
-                'originalFileName': file_name,
-                'contentType': content_type
-            }
-            
-            logger.info(f"UploadDocuments: Sending file as base64: {file_name}, size: {len(file_content)} bytes, content_type: {content_type}")
-            logger.info(f"UploadDocuments: Data keys: {list(data.keys())}")
-            
-            return self._make_request("uploadDocuments/", method='POST', data=data, files=None)
-            
+            if hasattr(file, 'read'):
+                # Read a small chunk to test if file is readable
+                test_chunk = file.read(1024)
+                file.seek(0)  # Reset to beginning
+                logger.info(f"UploadDocuments: File is readable, test chunk size: {len(test_chunk)} bytes")
+            else:
+                logger.warning(f"UploadDocuments: File object does not have read method")
         except Exception as e:
-            logger.error(f"Error encoding file as base64: {e}")
-            # Fallback to multipart method
-            files = {'document': (file_name, file, content_type)}
-            data = {
-                'type': file_type,
-                'userId': user_id,
-                'fileName': file_name_param
+            logger.error(f"UploadDocuments: Error testing file readability: {e}")
+            return None
+        
+        # Use multipart form data approach (matches the curl command exactly)
+        files = {'file': (file_name, file, content_type)}
+        data = {
+            'type': file_type,
+            'userId': user_id,
+            'fileName': file_name_param
+        }
+        
+        logger.info(f"UploadDocuments: Sending file: {file_name}, size: {getattr(file, 'size', 'unknown')}, content_type: {content_type}")
+        logger.info(f"UploadDocuments: Data: {data}")
+        logger.info(f"UploadDocuments: Files structure: {files}")
+        logger.info(f"UploadDocuments: File object type: {type(file)}")
+        logger.info(f"UploadDocuments: File object attributes: {dir(file)}")
+        logger.info(f"UploadDocuments: File readable: {hasattr(file, 'read')}")
+        logger.info(f"UploadDocuments: File seekable: {hasattr(file, 'seek')}")
+        
+        # Make a direct request without using session headers for multipart
+        try:
+            url = f"{self.base_url}/uploadDocuments/"
+            logger.info(f"UploadDocuments: Making direct request to {url}")
+            
+            # Create headers without Content-Type for multipart
+            headers = {
+                'Accept': 'application/json',
+                'User-Agent': 'CarePay-Bot/1.0'
             }
             
-            logger.info(f"UploadDocuments: Fallback to multipart - Sending file: {file_name}, content_type: {content_type}")
-            return self._make_request("uploadDocuments/", method='POST', data=data, files=files)
+            logger.info(f"UploadDocuments: Headers: {headers}")
+            logger.info(f"UploadDocuments: Request data: {data}")
+            logger.info(f"UploadDocuments: Request files: {files}")
+            
+            response = requests.post(
+                url,
+                data=data,
+                files=files,
+                headers=headers,
+                timeout=self.timeout
+            )
+            
+            logger.info(f"UploadDocuments: Response status: {response.status_code}")
+            logger.info(f"UploadDocuments: Response headers: {dict(response.headers)}")
+            
+            try:
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"UploadDocuments: HTTP Error: {e}")
+                logger.error(f"UploadDocuments: Response content: {response.text}")
+                # Try to parse error response
+                try:
+                    error_data = response.json()
+                    logger.error(f"UploadDocuments: Error response JSON: {error_data}")
+                    return error_data
+                except:
+                    logger.error(f"UploadDocuments: Could not parse error response as JSON")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"UploadDocuments: Exception occurred: {str(e)}")
+            return None
     
     def get_loan_transactions(self, doctor_id: str, parent_doctor_id: str = '', clinic_name: str = '', 
                             start_date: str = '', end_date: str = '', loan_status: str = '') -> Optional[Dict]:
