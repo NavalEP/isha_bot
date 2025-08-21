@@ -405,3 +405,54 @@ class GetAllChildClinicsView(BaseLoanAPIView):
             'attachment': None,
             'message': result.get('message', 'Failed to fetch child clinics')
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class GetLoanDetailsByUserIdView(BaseLoanAPIView):
+    """Get loan details by user ID"""
+    
+    def get(self, request):
+        user_id = request.GET.get('userId')
+        if not user_id:
+            return Response({
+                'status': 400,
+                'message': 'userId parameter is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            result = self.api_client.get_loan_details_by_user_id(user_id)
+            
+            if result and result.get('status') == 200:
+                return Response({
+                    'status': 200,
+                    'data': result.get('data', {}),
+                    'attachment': None,
+                    'message': 'Loan details retrieved successfully'
+                })
+            
+            # Handle 404 case specifically
+            if result and result.get('status') == 404:
+                return Response({
+                    'status': 404,
+                    'data': None,
+                    'attachment': None,
+                    'message': result.get('message', 'Loan details not found')
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Handle other error cases
+            error_message = result.get('message', 'Failed to fetch loan details') if result else 'No response from external API'
+            logger.error(f"Error fetching loan details for user {user_id}: {error_message}")
+            
+            return Response({
+                'status': 500,
+                'data': None,
+                'attachment': None,
+                'message': error_message
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+        except Exception as e:
+            logger.error(f"Exception in get_loan_details_by_user_id for user {user_id}: {str(e)}")
+            return Response({
+                'status': 500,
+                'data': None,
+                'attachment': None,
+                'message': f'Internal server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

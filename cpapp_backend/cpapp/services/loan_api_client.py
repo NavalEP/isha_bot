@@ -259,6 +259,13 @@ class LoanAPIClient:
         }
         return self._make_request("getAllChildClinic", params=params)
     
+    def get_loan_details_by_user_id(self, user_id: str) -> Optional[Dict]:
+        """Get loan details by user ID"""
+        params = {
+            'userId': user_id
+        }
+        return self._make_request("userDetails/getLoanDetailsByUserId", params=params)
+    
     def get_matching_emi_plans(self, user_id: str, loan_id: str) -> Dict[str, Any]:
         """
         Get matching EMI plans by combining assigned product and bureau decision APIs

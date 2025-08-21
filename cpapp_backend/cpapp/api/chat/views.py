@@ -727,3 +727,124 @@ class SaveUserEmploymentDetailsView(APIView):
                 "message": "An unexpected error occurred",
                 "error_details": str(e) if settings.DEBUG else None
             }, status=500)
+
+
+class DoctorSessionsView(APIView):
+    """
+    View for getting all sessions associated with a specific doctor
+    """
+    # authentication_classes = [JWTAuthentication]
+    
+    def get(self, request):
+        try:
+            # Check if user is authenticated
+            if not request.user or request.user == 'AnonymousUser':
+                return Response({
+                    "status": "error",
+                    "message": "Authentication required"
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            # Get doctor_id from query parameters
+            doctor_id = request.GET.get('doctorId')
+            
+            if not doctor_id:
+                return Response({
+                    "status": "error",
+                    "message": "doctorId parameter is required"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get optional query parameters for filtering and pagination
+            status_filter = request.GET.get('status')
+            limit = request.GET.get('limit', 50)  # Default limit of 50
+            offset = request.GET.get('offset', 0)  # Default offset of 0
+            include_empty = request.GET.get('include_empty', 'false').lower() == 'true'  # Default: exclude empty sessions
+            
+            try:
+                limit = int(limit)
+                offset = int(offset)
+            except ValueError:
+                return Response({
+                    "status": "error",
+                    "message": "limit and offset must be integers"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Build the query
+            query = SessionData.objects.filter(data__doctor_id=doctor_id)
+            
+            # Apply status filter if provided
+            if status_filter:
+                query = query.filter(status=status_filter)
+            
+            # Order by created_at in descending order (most recent first)
+            sessions = query.order_by('-created_at')[offset:offset + limit]
+            
+            # Format the response
+            session_list = []
+            for session in sessions:
+                # Extract useful information from session data
+                session_data_dict = session.data or {}
+                patient_name = session_data_dict.get('firstName') or session_data_dict.get('fullName') or 'Unknown'
+                treatment_cost = session_data_dict.get('treatmentCost') or session_data_dict.get('loanAmount')
+                monthly_income = session_data_dict.get('monthlyIncome')
+                phone_number = session_data_dict.get('phoneNumber')
+                
+                # Check if patient info is meaningful (not just "Unknown" and null values)
+                has_meaningful_data = (
+                    patient_name != 'Unknown' and 
+                    patient_name and 
+                    (treatment_cost is not None or 
+                     monthly_income is not None or 
+                     phone_number is not None or
+                     session_data_dict.get('mobileNumber') is not None or
+                     session_data_dict.get('treatmentReason') is not None)
+                )
+                
+                # Skip sessions with no meaningful patient data (unless include_empty is true)
+                if not has_meaningful_data and not include_empty:
+                    continue
+                
+                session_data = {
+                    "session_id": str(session.session_id),
+                    "application_id": str(session.application_id),
+                    "phone_number": session.phone_number,
+                    "status": session.status,
+                    "created_at": session.created_at.isoformat() if session.created_at else None,
+                    "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+                    "patient_info": {
+                        "name": patient_name,
+                        "phone_number": phone_number,
+                        "treatment_cost": treatment_cost,
+                        "monthly_income": monthly_income
+                    },
+                }
+                session_list.append(session_data)
+            
+            # Get total count for pagination
+            total_count = SessionData.objects.filter(data__doctor_id=doctor_id).count()
+            if status_filter:
+                total_count = SessionData.objects.filter(data__doctor_id=doctor_id, status=status_filter).count()
+            
+            logger.info(f"Found {len(session_list)} sessions for doctor_id: {doctor_id} (showing {offset+1}-{offset+len(session_list)} of {total_count})")
+            
+            return Response({
+                "status": "success",
+                "doctor_id": doctor_id,
+                "total_sessions": total_count,
+                "sessions_returned": len(session_list),
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": (offset + limit) < total_count
+                },
+                "filters": {
+                    "status": status_filter,
+                },
+                "sessions": session_list
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error getting doctor sessions: {e}")
+            return Response({
+                "status": "error",
+                "message": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -1,13 +1,13 @@
 from django.urls import path
 from django.http import JsonResponse
-from cpapp.api.chat.views import ChatSessionView, ChatMessageView, SessionDetailsView, ShortlinkRedirectView, UserDetailsView, SaveUserBasicDetailsView, SaveUserAddressDetailsView, SaveUserEmploymentDetailsView
+from cpapp.api.chat.views import ChatSessionView, ChatMessageView, SessionDetailsView, ShortlinkRedirectView, UserDetailsView, SaveUserBasicDetailsView, SaveUserAddressDetailsView, SaveUserEmploymentDetailsView, DoctorSessionsView
 from cpapp.api.login.views import SendOtpView, VerifyOtpView, DoctorStaffView
 from cpapp.api.document.views import AadhaarUploadView, PanCardUploadView
 from cpapp.api.treatment.views import TreatmentSearchView, TreatmentCategoriesView
 from cpapp.api.loan.views import (
     GetQrCodeView, ActivitiesLogView, AssignedProductView, BureauDecisionView,
     DisburseDetailReportView, UploadDocumentsView, LoanTransactionsView, MatchingEmiPlansView,
-    LoanCountAndAmountView, UserLoanStatusView, GetAllChildClinicsView
+    LoanCountAndAmountView, UserLoanStatusView, GetAllChildClinicsView, GetLoanDetailsByUserIdView
 )
 
 
@@ -18,6 +18,7 @@ urlpatterns = [
     path('', api_root_view, name='api_root'),
     path('session/', ChatSessionView.as_view(), name='create_session'),
     path('message/', ChatMessageView.as_view(), name='send_message'),
+    path('doctor-sessions/', DoctorSessionsView.as_view(), name='doctor_sessions'),
     path('login/send-otp/', SendOtpView.as_view(), name='send_otp'),
     path('login/verify-otp/', VerifyOtpView.as_view(), name='verify_otp'),
     path('login/doctor-staff/', DoctorStaffView.as_view(), name='doctor_staff'),
@@ -44,4 +45,5 @@ urlpatterns = [
     path('getLoanCountAndAmountForDoctor/', LoanCountAndAmountView.as_view(), name='loan_count_and_amount'),
     path('status/getUserLoanStatus/', UserLoanStatusView.as_view(), name='user_loan_status'),
     path('getAllChildClinic/', GetAllChildClinicsView.as_view(), name='get_all_child_clinics'),
+    path('userDetails/getLoanDetailsByUserId/', GetLoanDetailsByUserIdView.as_view(), name='get_loan_details_by_user_id'),
 ]
