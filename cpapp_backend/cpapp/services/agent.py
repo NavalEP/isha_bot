@@ -4316,7 +4316,7 @@ Please Enter input 1 or 2 only"""
             # Prepare basic details from OCR data
             basic_details = {
                 "userId": user_id,
-                "firstName": result.get('name', ''),
+                # "firstName": result.get('name', ''),
                 "dateOfBirth": result.get('dob', ''),
                 "gender": result.get('gender', ''),
                 "aadhaarNo": result.get('aadhaar_number', ''),
