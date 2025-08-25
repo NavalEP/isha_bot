@@ -3161,7 +3161,7 @@ CTA -
 
 No-cost Credit & Debit Card EMI
 
-Re-apply through family member"""
+Re-enquire with your family member's details."""
                 
         except Exception as e:
             logger.error(f"Error handling additional details collection: {e}")
@@ -3942,7 +3942,7 @@ CTA - \n\n
 
 No-cost Credit & Debit Card EMI\n\n
 
-Re-apply through family member"""
+Re-enquire with your family member's details."""
                 else:
                     return f"""
 We need a few more details to better assess patient {patient_name}'s application.
