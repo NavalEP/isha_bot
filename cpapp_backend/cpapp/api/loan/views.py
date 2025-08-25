@@ -236,7 +236,6 @@ class LoanTransactionsView(BaseLoanAPIView):
     
     def get(self, request):
         doctor_id = request.GET.get('doctorId', '')
-        parent_doctor_id = request.GET.get('parentDoctorId', '')
         clinic_name = request.GET.get('clinicName', '')
         start_date = request.GET.get('startDate', '')
         end_date = request.GET.get('endDate', '')
@@ -244,7 +243,6 @@ class LoanTransactionsView(BaseLoanAPIView):
         
         result = self.api_client.get_loan_transactions(
             doctor_id=doctor_id,
-            parent_doctor_id=parent_doctor_id,
             clinic_name=clinic_name,
             start_date=start_date,
             end_date=end_date,

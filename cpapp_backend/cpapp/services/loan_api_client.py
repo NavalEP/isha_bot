@@ -219,7 +219,7 @@ class LoanAPIClient:
             logger.error(f"UploadDocuments: Exception occurred: {str(e)}")
             return None
     
-    def get_loan_transactions(self, doctor_id: str, parent_doctor_id: str = '', clinic_name: str = '', 
+    def get_loan_transactions(self, doctor_id: str, clinic_name: str = '', 
                             start_date: str = '', end_date: str = '', loan_status: str = '') -> Optional[Dict]:
         """Get loan transactions for doctor"""
         params = {
@@ -231,10 +231,6 @@ class LoanAPIClient:
             'loanStatus': loan_status
         }
         
-        # Add parentDoctorId if provided
-        if parent_doctor_id:
-            params['parentDoctorId'] = parent_doctor_id
-            
         return self._make_request("getAllLoanDetailForDoctorNew", params=params)
     
     def get_loan_count_and_amount_for_doctor(self, doctor_id: str, clinic_name: str = '') -> Optional[Dict]:
