@@ -283,51 +283,6 @@ class CarepayAPIClient:
         
         result = self._make_request('GET', endpoint, params=params)
         
-        # If successful, try to extract eligible EMI information
-        if result.get("status") == 200:
-            try:
-                # Extract data from nested response
-                data = result.get("data", {}).get("data", {})
-                
-                # Extract key decision fields
-                final_decision = data.get("finalDecision")
-                max_eligible_emi = data.get("maxEligibleEmi")
-                loan_amount = data.get("loanAmount")
-                treatment_amount = data.get("treatmentAmount")
-                
-                # Format EMI plans
-                emi_plans = []
-                if "emiPlanList" in data:
-                    for plan in data["emiPlanList"]:
-                        formatted_plan = {
-                            "creditLimit": str(plan.get("creditLimit", 0)),
-                            "emi": str(plan.get("emi", 0)),
-                            "downPayment": str(plan.get("downPayment", 0)),
-                            "netLoanAmount": str(plan.get("netLoanAmount", 0)),
-                            "productDetails": plan.get("productDetailsDO", {})
-                        }
-                        emi_plans.append(formatted_plan)
-                
-                # Build standardized response
-                formatted_result = {
-                    "status": 200,
-                    "data": {
-                        "status": final_decision,
-                        "maxEligibleEMI": str(max_eligible_emi) if max_eligible_emi else None,
-                        "loanAmount": str(loan_amount) if loan_amount else None,
-                        "treatmentAmount": str(treatment_amount) if treatment_amount else None,
-                        "emiPlans": emi_plans,
-                        "reason": data.get("rejectionReasons", []),
-                        "incomeVerificationReasons": data.get("incomeVerificationReasons", []),
-                        "detailedChecks": data.get("detailedChecks", {})
-                    }
-                }
-                
-                return formatted_result
-                
-            except Exception as e:
-                logger.warning(f"Error formatting bureau decision: {e}")
-                return result
         
         return result
 
