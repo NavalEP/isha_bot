@@ -3274,7 +3274,7 @@ Upload bank statement by clicking on the link below.
 
 {link_to_display}"""
                 elif decision_status == "APPROVED":
-                    return f"""Great news! 🥳 Patient {patient_name}'s loan is **APPROVED** ✅.
+                    return f"""Great news! 🥳 Patient {patient_name} is **APPROVED** ✅ for a no-cost EMI payment plan.
 
 You are just 4 steps away from the disbursal.
 
@@ -4023,7 +4023,8 @@ Continue your journey with the link here:\n\n
                     # Check if max_treatment_amount is greater than or equal to treatment_cost
                     if max_treatment_amount >= treatment_cost:
                         return f"""
-🎉 Congratulations, Patient {patient_name} is eligible for a loan up to ₹{max_treatment_amount:,.0f}. ✅
+🎉 Congratulations, {patient_name} is eligible ✅ for a no-cost EMI
+payment plan for amount up to ₹{max_treatment_amount:,.0f}.
 
 To proceed, please help me with a few more details.
 
@@ -4033,9 +4034,9 @@ Patient's employment type:
 Please Enter input 1 or 2 only"""
                     else:
                         return f"""
-We were only able to **approve** payment plans
+We were only able to approve payment plans
 for a treatment amount up to
-**₹{max_treatment_amount:,.0f}**
+₹{max_treatment_amount:,.0f}
 
 1. Continue with this limit
 2. Continue with limit enhancement"""
