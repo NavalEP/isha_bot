@@ -55,20 +55,21 @@ class CarepayAgent:
         GENERAL CRITICAL RULES:
         - You MUST call the appropriate tools to save or update data. Do NOT generate success messages without calling the tools first. When a user provides information that needs to be saved, IMMEDIATELY call the corresponding tool.
         - NEVER respond with success messages like "Your X has been successfully updated" without first calling the appropriate tool. Use the tool's response to inform the user.
-        - When a user provides any information that needs to be saved (gender, marital status, education level, treatment reason, treatment cost, date of birth), you MUST call the corresponding tool. Do NOT generate any response until you have called the tool.
+        - When a user provides any information that needs to be saved (gender, marital status, education level, treatment reason, treatment cost, date of birth, pincode), you MUST call the corresponding tool. Do NOT generate any response until you have called the tool.
         - When a user provides a treatment reason (e.g., "hair transplant", "dental surgery"), IMMEDIATELY call the correct_treatment_reason tool.
+        - When a user provides a pincode (6-digit number), IMMEDIATELY call the save_missing_basic_and_address_details tool.
         - CRITICAL: When you have just asked for missing details (like gender) and the user responds with that information, you MUST call save_gender_details tool. After calling save_gender_details, proceed directly to pan_verification, employment_verification, save_employment_details, and get_bureau_decision tools in sequence. Do NOT call save_basic_details again after save_gender_details.
+        - after calling save_missing_basic_and_address_details, According Workflow A or B continue the next step
         - NEVER generate any success message without calling the tool first.
-        - NEVER ask for Aadhaar upload after Aadhaar has already been successfully processed.
         - NEVER modify, truncate, or duplicate any formatted messages. Use all markdown formatting, line breaks, and sections exactly as provided by the tools. Do NOT add, merge, or change any text or formatting.
-        - If the user sends "Successfully processed Aadhaar document and saved details.", IMMEDIATELY proceed to PAN card collection. Do NOT ask for Aadhaar upload again.
+        - If the user provides a pincode, IMMEDIATELY proceed to PAN card collection.
         - You MUST execute ALL steps in sequence for the chosen workflow. Do NOT stop until the workflow is complete.
 
         ----
 
-        ## Workflow A: Normal Flow (No Aadhaar Upload Required)
+        ## Workflow A: Normal Flow
 
-        This workflow is followed when `get_prefill_data` returns status 200 (including when Aadhaar is already processed).
+        This workflow is followed when `get_prefill_data` returns status 200.
 
         1. **Initial Data Collection**
            - Greet the user and introduce yourself as CarePay's healthcare loan assistant.
@@ -104,6 +105,11 @@ class CarepayAgent:
 
         7. **Address Processing**
            - Use `process_address_data using session_id` tool.
+           - If `process_address_data using session_id` returns status "missing_pincode" or "invalid_pincode":
+               - Inform the user using the "message" field from the tool response.
+               - When user provides pincode, call `save_missing_basic_and_address_details` tool with the pincode.
+               - Then proceed directly to steps 8-12.
+           - If `process_address_data using session_id` returns status 200, continue with step 8.
 
         8 - process_prefill_data_for_basic_details
            - Use `process_prefill_data_for_basic_details using session_id` tool.
@@ -129,79 +135,60 @@ class CarepayAgent:
            - Use `get_bureau_decision using session_id` tool and return the formatted response exactly as provided.
 
         **CRITICAL RULES FOR WORKFLOW A:**
-        - NEVER ask for Aadhaar upload in this workflow.
         - NEVER stop after process_prefill_data; always continue to get_bureau_decision.
         - NEVER mix Workflow A and Workflow B.
-        - NEVER ask for Aadhaar upload if get_prefill_data returns status 200 or if Aadhaar is already processed.
         - Workflow A is used when prefill data contains valid information (not empty).
         - Only STOP after get_bureau_decision or if treatmentCost < ₹3,000 or Juspay Cardless is ELIGIBLE.
         - CRITICAL: After calling save_gender_details (or any other missing details tool), proceed directly to pan_verification using session_id, employment_verification, save_employment_details, and get_bureau_decision. Do NOT call save_basic_details again.
         - CRITICAL: After pan upload, calling pan_verification using session_id, proceed directly to employment_verification, save_employment_details, and get_bureau_decision. Do NOT call save_basic_details again.
+        - CRITICAL: After calling save_missing_basic_and_address_details (when pincode is provided), proceed directly to process_prefill_data_for_basic_details, pan_verification using session_id, employment_verification, save_employment_details, and get_bureau_decision. Do NOT call process_address_data again.
 
         ----
 
-        ## Workflow B: Aadhaar Upload Flow (STRICT CHECKLIST)
+        ## Workflow B: Direct Pincode Collection Flow (STRICT CHECKLIST)
 
         Trigger:
         - Use this ONLY when `get_prefill_data` returns status 500 with error "phoneToPrefill_failed" OR when prefill data is empty (all important fields like pan, name, income, gender, age, dob are empty).
         - NEVER mix with Workflow A.
 
         State Flags (internal):
-        - aadhaar_processed = false
         - pan_verified = false
         - employment_verified = false
         - employment_details_submitted = false
         - bureau_decision_processed = false
 
-        Step 1: Aadhaar Availability Check
-        - Ask: "Do Patient have an Aadhaar card? Please reply with\n1. Yes\n2. No"
-        IF user replies "Yes":
-          - Ask the user to upload both front and back of Aadhaar.
-        IF user replies "No":
-          - Switch to sequential collection mode (DO NOT call save_missing_basic_and_address_details yet)
-          - Then ask ONLY "Please provide 6-digit pincode of Patient's Current address:" and wait for response
-          - Only after collect pincode, call save_missing_basic_and_address_details
-          - Then proceed directly to Step 3 (PAN collection)
+        Step 1: Current Address Pincode Collection
+        - Ask ONLY "Please provide 6-digit pincode of Patient's Current address:" and wait for response
+        - After collecting pincode, call save_missing_basic_and_address_details
+        - Then proceed directly to Step 2 (PAN collection)
 
-        Step 2: After Aadhaar Upload
-        - If the user responds with "Successfully processed Aadhaar document and saved details.":
-          - Set aadhaar_processed = true
-          - Set aadhaar_uploaded = true
-          - Then proceed to Step 3.
-          - DO NOT ask for Aadhaar again.
-          - Proceed to Step 3.
-        - Otherwise, keep asking for Aadhaar upload.
-
-        Step 3: PAN Card Collection
-        - IF aadhaar_uploaded = true AND pan_uploaded = true → proceed directly to Step 4
-        - Otherwise, ask: "Please provide Patient's PAN card details. You can either:\n\n**Upload Patient's PAN card** by clicking the file upload button below\n**Enter Patient's PAN card number manually** (10-character alphanumeric code)\n\n"
-        - IF aadhaar_uploaded = true AND user provides a PAN number → handle_pan_card_number → proceed directly to Step 4
-        - IF aadhaar_uploaded = false AND user provides a PAN number → handle_pan_card_number → then ask for date of birth (DD-MM-YYYY) and call save by correct_date_of_birth tool → then ask for gender: "Please select Patient's gender:\n1. Male\n2. Female\n" and wait for user response, then call save_gender_B_details
+        Step 2: PAN Card Collection
+        - Ask: "Please provide Patient's PAN card details. You can either:\n\n**Upload Patient's PAN card** by clicking the file upload button below\n**Enter Patient's PAN card number manually** (10-character alphanumeric code)\n\n"
+        - IF user provides a PAN number → handle_pan_card_number → then ask for date of birth (DD-MM-YYYY) and call save by correct_date_of_birth tool → then ask for gender: "Please select Patient's gender:\n1. Male\n2. Female\n" and wait for user response, then call save_gender_B_details
         - IF user uploads PAN card → wait for upload confirmation message(PAN card processed successfully) → then ask: "Please select Patient's gender:\n1. Male\n2. Female\n" and wait for user response, then call save_gender_B_details
-        - After PAN is saved and additional details collected, continue with Step 4
+        - After PAN is saved and additional details collected, continue with Step 3
       
-        Step 4: PAN Verification
+        Step 3: PAN Verification
         - Call pan_verification using session_id
-        - IF it fails → return to Step 3 (re-collect PAN) and retry
-        - IF it succeeds → set pan_verified = true → go to Step 5
+        - IF it fails → return to Step 2 (re-collect PAN) and retry
+        - IF it succeeds → set pan_verified = true → go to Step 4
 
-        Step 5: Employment Verification
+        Step 4: Employment Verification
         - Call get_employment_verification (continue even if it fails)
         - If status 200 → set employment_verified = true
-        - Proceed to Step 6
+        - Proceed to Step 5
 
-        Step 6: Save Employment Details
+        Step 5: Save Employment Details
         - Call save_employment_details
         - If status 200 → set employment_details_submitted = true
-        - Proceed to Step 7
+        - Proceed to Step 6
 
-        Step 7: Process Loan Application
+        Step 6: Process Loan Application
         - Call get_bureau_decision
         - Use its formatted response exactly as provided; set bureau_decision_processed = true
         - END
 
         Do Not Repeat Rules:
-        - If aadhaar_processed == true → never ask Aadhaar again; jump to Step 3.
         - Never mix Workflow A and Workflow B.
 
         End Condition:
@@ -248,7 +235,7 @@ class CarepayAgent:
 
             # Create initial greeting message
             initial_message = (
-                "Hello! I'm **Careena 👩🏻‍⚕️**. I’m here to help you check Patient's eligibility for a medical loan.\n\n"
+                "Hello! I'm **Careena 👩🏻‍⚕️**. I'm here to help you check Patient's eligibility for a medical loan.\n\n"
                 "To get started, please share the following details:\n\n"
                 "1. Patient's full name\n"
                 "2. Patient's phone number (linked to their PAN)\n"
@@ -322,7 +309,7 @@ CRITICAL CONTEXT AWARENESS RULES:
 5. Maintain consistency with previous responses and collected information
 6. If the user wants to change something, use the appropriate correction tools
 7. Remember the current workflow (A or B) and application status
-8. NEVER ask for Aadhaar upload in Workflow A or if Aadhaar is already processed
+8. NEVER ask for Aadhaar upload in Workflow A
 9. NEVER mix Workflow A and Workflow B - stick to the current workflow
 10. Continue from where you left off based on the current step in the workflow
 11. CRITICAL: After missing details collection is complete, proceed to the next workflow step (PAN verification, employment verification, etc.) - DO NOT restart the workflow
@@ -434,16 +421,6 @@ CRITICAL CONTEXT AWARENESS RULES:
             "Workflow A" or "Workflow B"
         """
         try:
-            # Check if Aadhaar upload was requested or processed
-            for msg in history:
-                content = msg.get("content", "").lower()
-                if "aadhaar" in content and "upload" in content:
-                    return "Workflow B"
-            
-            # Check if Aadhaar is already processed
-            if data.get("aadhaar_uploaded"):
-                return "Workflow A"
-            
             # Check if get_prefill_data returned status 500 with phoneToPrefill_failed or empty data
             for msg in history:
                 content = msg.get("content", "")
@@ -556,9 +533,9 @@ CRITICAL CONTEXT AWARENESS RULES:
         Determine current step in Workflow B
         """
         try:
-            # Check if Aadhaar is uploaded
-            if not data.get("aadhaar_uploaded"):
-                return "Step 1: Aadhaar Upload Request"
+            # Check if pincode is collected
+            if not data.get("pincode_collected"):
+                return "Step 1: Current Address Pincode Collection"
             
             # Check if PAN is provided
             if not data.get("panNumber"):
@@ -628,8 +605,8 @@ CRITICAL CONTEXT AWARENESS RULES:
                     indicators.append("✓ Bureau decision processed")
             else:
                 # Workflow B progress indicators
-                if data.get("aadhaar_uploaded"):
-                    indicators.append("✓ Aadhaar uploaded")
+                if data.get("pincode_collected"):
+                    indicators.append("✓ Pincode collected")
                 if data.get("panNumber"):
                     indicators.append("✓ PAN number provided")
                 if data.get("pan_verified"):
@@ -691,10 +668,6 @@ CRITICAL CONTEXT AWARENESS RULES:
                 # In Workflow A, never ask for Aadhaar upload
                 if "aadhaar" in ai_message_lower and "upload" in ai_message_lower:
                     inconsistencies.append("AI asking for Aadhaar upload in Workflow A")
-            else:
-                # In Workflow B, don't ask for Aadhaar again if already uploaded
-                if data.get("aadhaar_uploaded") and "aadhaar" in ai_message_lower and "upload" in ai_message_lower:
-                    inconsistencies.append("AI asking for Aadhaar upload when already completed")
             
             # Check if AI is asking for PAN upload when PAN number is already provided
             if data.get("panNumber") and "pan" in ai_message_lower and "upload" in ai_message_lower:
@@ -778,8 +751,8 @@ CRITICAL CONTEXT AWARENESS RULES:
                 if msg_type == "HumanMessage":
                     if any(keyword in content for keyword in ["name:", "phone:", "cost:", "income:"]):
                         milestones.append(f"Step {i//2 + 1}: User provided initial data")
-                    elif "aadhaar" in content and "upload" in content:
-                        milestones.append(f"Step {i//2 + 1}: User uploaded Aadhaar")
+                    elif "pincode" in content and len(content.strip()) == 6:
+                        milestones.append(f"Step {i//2 + 1}: User provided pincode")
                     elif "pan" in content and ("upload" in content or len(content.strip()) == 10):
                         milestones.append(f"Step {i//2 + 1}: User provided PAN")
                     elif any(keyword in content for keyword in ["1", "2", "salaried", "self-employed"]):
@@ -790,8 +763,8 @@ CRITICAL CONTEXT AWARENESS RULES:
                 elif msg_type == "AIMessage":
                     if "employment type" in content and "1. SALARIED" in content:
                         milestones.append(f"Step {i//2 + 1}: AI asked for employment type")
-                    elif "aadhaar" in content and "upload" in content:
-                        milestones.append(f"Step {i//2 + 1}: AI requested Aadhaar upload")
+                    elif "pincode" in content and "current address" in content:
+                        milestones.append(f"Step {i//2 + 1}: AI requested pincode")
                     elif "pan" in content and "upload" in content:
                         milestones.append(f"Step {i//2 + 1}: AI requested PAN upload")
                     elif "email" in content and "address" in content:
@@ -814,8 +787,8 @@ CRITICAL CONTEXT AWARENESS RULES:
                     summary_parts.append("- Patient details collected")
                 if data.get("treatmentCost"):
                     summary_parts.append(f"- Treatment cost: ₹{data.get('treatmentCost')}")
-                if data.get("aadhaar_uploaded"):
-                    summary_parts.append("- Aadhaar verification completed")
+                if data.get("pincode_collected"):
+                    summary_parts.append("- Pincode collected")
                 if data.get("panNumber"):
                     summary_parts.append("- PAN number provided")
                 if data.get("pan_verified"):
@@ -903,13 +876,9 @@ CRITICAL CONTEXT AWARENESS RULES:
             if "loan details" in ai_message_lower and "submitted" in ai_message_lower:
                 progress_updates["loan_details_submitted"] = True
             
-            # Check for Aadhaar upload (STRICT)
-            # Only mark uploaded when exact success phrase is present or OCR data exists
-            if (
-                "successfully processed aadhaar document and saved details." in ai_message_lower
-                or data.get("ocr_result")
-            ):
-                progress_updates["aadhaar_uploaded"] = True
+            # Check for pincode collection
+            if "pincode" in message_lower and len(message_lower.strip()) == 6:
+                progress_updates["pincode_collected"] = True
             
             # Check for PAN upload
             if ("pan" in message_lower and "upload" in message_lower) or "pan card" in ai_message_lower:
@@ -951,6 +920,14 @@ CRITICAL CONTEXT AWARENESS RULES:
                     and "1. SALARIED" in text
                     and "2. SELF_EMPLOYED" in text
                     and "Please Enter input 1 or 2 only" in text
+                )
+
+            # Helper: detect limit options prompt in a string
+            def is_limit_options_prompt(text: str) -> bool:
+                return (
+                    "Continue with this limit" in text
+                    and "Continue with limit enhancement" in text
+                    and ("1." in text and "2." in text)
                 )
 
             # If already collecting additional details, use the sequential handler,
@@ -1068,6 +1045,21 @@ CRITICAL CONTEXT AWARENESS RULES:
                             bureau_decision_tool_used = True
                             logger.info(f"Found get_bureau_decision tool output with employment type prompt: {bureau_decision_tool_output}")
                             break
+                        elif is_limit_options_prompt(str(tool_output)):
+                            bureau_decision_tool_output = str(tool_output)
+                            # Remove duplicate lines
+                            lines = bureau_decision_tool_output.split('\n')
+                            unique_lines = []
+                            seen_lines = set()
+                            for line in lines:
+                                line = line.strip()
+                                if line and line not in seen_lines:
+                                    unique_lines.append(line)
+                                    seen_lines.add(line)
+                            bureau_decision_tool_output = '\n'.join(unique_lines)
+                            bureau_decision_tool_used = True
+                            logger.info(f"Found get_bureau_decision tool output with limit options prompt: {bureau_decision_tool_output}")
+                            break
             else:
                 logger.info("No intermediate_steps found in response - agent executor may not have called any tools")
 
@@ -1091,12 +1083,23 @@ CRITICAL CONTEXT AWARENESS RULES:
                             # Force update again
                             SessionManager.update_session_data_field(session_id, "status", "collecting_additional_details")
                             logger.info("Forced status update again")
+                elif is_limit_options_prompt(bureau_decision_tool_output):
+                    logger.info(f"Limit options prompt detected, updating session status for {session_id}")
+                    SessionManager.update_session_data_field(session_id, "status", "collecting_additional_details")
+                    SessionManager.update_session_data_field(session_id, "data.collection_step", "limit_options")
+                    updated_session = SessionManager.get_session_from_db(session_id)
+                    if not updated_session.get("data", {}).get("additional_details"):
+                        SessionManager.update_session_data_field(session_id, "data.additional_details", {})
+                    logger.info(f"Session {session_id} marked as collecting_additional_details (from limit_options branch)")
                 
                 self._update_session_history(session_id, message, bureau_decision_tool_output)
                 return bureau_decision_tool_output
 
             # Check if the agent executor output contains employment type prompt (even if tool wasn't called directly)
             employment_type_prompt_in_output = is_employment_type_prompt(ai_message)
+            
+            # Check if the agent executor output contains limit options prompt
+            limit_options_prompt_in_output = is_limit_options_prompt(ai_message)
 
             # Check if agent should have called bureau decision tool but didn't
             should_have_called_bureau_tool = (
@@ -1141,6 +1144,20 @@ CRITICAL CONTEXT AWARENESS RULES:
                         # Force update again
                         SessionManager.update_session_data_field(session_id, "status", "collecting_additional_details")
                         logger.info("Forced status update again")
+                
+                self._update_session_history(session_id, message, ai_message)
+                logger.info(f"Final response to user: {ai_message}")
+                return ai_message
+
+            # If limit options prompt is present in output, update status and collection step
+            if limit_options_prompt_in_output:
+                logger.info(f"Limit options prompt detected in agent output, updating session status for {session_id}")
+                SessionManager.update_session_data_field(session_id, "status", "collecting_additional_details")
+                SessionManager.update_session_data_field(session_id, "data.collection_step", "limit_options")
+                updated_session = SessionManager.get_session_from_db(session_id)
+                if not updated_session.get("data", {}).get("additional_details"):
+                    SessionManager.update_session_data_field(session_id, "data.additional_details", {})
+                logger.info(f"Session {session_id} marked as collecting_additional_details (from limit_options output branch)")
                 
                 self._update_session_history(session_id, message, ai_message)
                 logger.info(f"Final response to user: {ai_message}")
@@ -1236,60 +1253,60 @@ CRITICAL CONTEXT AWARENESS RULES:
         except Exception as e:
             logger.error(f"Error updating session history: {e}")
 
-    def get_session_data(self, session_id: str = None) -> str:
-        """
-        Get session data for the current session
+    # def get_session_data(self, session_id: str = None) -> str:
+    #     """
+    #     Get session data for the current session
         
-        Args:
-            session_id: Session ID (required)
+    #     Args:
+    #         session_id: Session ID (required)
             
-        Returns:
-            Session data as JSON string with comprehensive data view
-        """
-        if not session_id:
-            return "Session ID not found"
+    #     Returns:
+    #         Session data as JSON string with comprehensive data view
+    #     """
+    #     if not session_id:
+    #         return "Session ID not found"
         
-        session = SessionManager.get_session_from_db(session_id)
-        if not session:
-            return "Session ID not found"
+    #     session = SessionManager.get_session_from_db(session_id)
+    #     if not session:
+    #         return "Session ID not found"
         
-        # Create a comprehensive view of session data
-        comprehensive_session = {
-            "session_info": {
-                "id": session.get("id"),
-                "status": session.get("status"),
-                "created_at": session.get("created_at"),
-                "phone_number": session.get("phone_number")
-            },
-            "user_data": session.get("data", {}),
-            "conversation_history": []
-        }
+    #     # Create a comprehensive view of session data
+    #     comprehensive_session = {
+    #         "session_info": {
+    #             "id": session.get("id"),
+    #             "status": session.get("status"),
+    #             "created_at": session.get("created_at"),
+    #             "phone_number": session.get("phone_number")
+    #         },
+    #         "user_data": session.get("data", {}),
+    #         "conversation_history": []
+    #     }
         
-        # History is already in serializable format
-        if "history" in session:
-            comprehensive_session["conversation_history"] = session["history"]
+    #     # History is already in serializable format
+    #     if "history" in session:
+    #         comprehensive_session["conversation_history"] = session["history"]
         
-        # Add summary of stored data
-        data = session.get("data", {})
-        data_summary = {
-            "core_user_data": {
-                "userId": data.get("userId"),
-                "fullName": data.get("fullName") or data.get("name"),
-                "phoneNumber": data.get("phoneNumber") or data.get("phone"),
-                "treatmentCost": data.get("treatmentCost"),
-                "monthlyIncome": data.get("monthlyIncome"),
-            },
-            "api_responses_count": len(data.get("api_responses", {})),
-            "api_requests_count": len(data.get("api_requests", {})),
-            "prefill_data_available": bool(data.get("prefill_data")),
-            "employment_data_available": bool(data.get("employment_data")),
-            "bureau_decision_available": bool(data.get("bureau_decision_details")),
-            "additional_details_available": bool(data.get("additional_details")),
-        }
+    #     # Add summary of stored data
+    #     data = session.get("data", {})
+    #     data_summary = {
+    #         "core_user_data": {
+    #             "userId": data.get("userId"),
+    #             "fullName": data.get("fullName") or data.get("name"),
+    #             "phoneNumber": data.get("phoneNumber") or data.get("phone"),
+    #             "treatmentCost": data.get("treatmentCost"),
+    #             "monthlyIncome": data.get("monthlyIncome"),
+    #         },
+    #         "api_responses_count": len(data.get("api_responses", {})),
+    #         "api_requests_count": len(data.get("api_requests", {})),
+    #         "prefill_data_available": bool(data.get("prefill_data")),
+    #         "employment_data_available": bool(data.get("employment_data")),
+    #         "bureau_decision_available": bool(data.get("bureau_decision_details")),
+    #         "additional_details_available": bool(data.get("additional_details")),
+    #     }
         
-        comprehensive_session["data_summary"] = data_summary
+    #     comprehensive_session["data_summary"] = data_summary
         
-        return json.dumps(comprehensive_session, indent=2)
+    #     return json.dumps(comprehensive_session, indent=2)
     
     # Tool implementations
     
@@ -1486,20 +1503,6 @@ CRITICAL CONTEXT AWARENESS RULES:
             if not user_id:
                 return "User ID is required to get prefill data"
             
-            # Check if Aadhaar has already been processed and stored
-            ocr_result = session.get("data", {}).get("ocr_result")
-            if ocr_result and ocr_result.get("name") and ocr_result.get("aadhaar_number"):
-                logger.info(f"Aadhaar already processed for user_id: {user_id}, proceeding with prefill data")
-                # Aadhaar has been processed, so we should proceed with the normal flow
-                # Return a mock 200 response to indicate success
-                return json.dumps({
-                    "status": 200,
-                    "data": {
-                        "message": "Aadhaar data already processed, proceeding with application",
-                        "aadhaar_processed": True
-                    }
-                })
-                
             result = self.api_client.get_prefill_data(user_id)
             # Store the complete API response in session data
             if session_id:
@@ -1512,8 +1515,8 @@ CRITICAL CONTEXT AWARENESS RULES:
                 return json.dumps({
                     "status": 500,
                     "error": "phoneToPrefill_failed",
-                    "message": "Please upload Patient's Aadhaar card to continue with the loan application process.",
-                    "requires_aadhaar_upload": True
+                    "message": "Follow workflow B. Please provide 6-digit pincode of Patient's Current address: ",
+                    "requires_pincode_collection": True
                 })
             
             # Check if the API call was successful but returned empty data
@@ -1546,8 +1549,8 @@ CRITICAL CONTEXT AWARENESS RULES:
                     return json.dumps({
                         "status": 500,
                         "error": "phoneToPrefill_empty_data",
-                        "message": "To continue with Patient's loan application, please upload Patient's Aadhaar card. You can upload it by clicking the file upload button below.",
-                        "requires_aadhaar_upload": True
+                        "message": "Follow workflow B. Please provide 6-digit pincode of Patient's Current address:",
+                        "requires_pincode_collection": True
                     })
             
             return json.dumps(result)
@@ -1965,10 +1968,12 @@ CRITICAL CONTEXT AWARENESS RULES:
             # Process result to extract and format eligible EMI information
             if isinstance(result, dict) and result.get("status") == 200:
                 bureau_result = self.extract_bureau_decision_details(result, session_id)
-                # Store the result in session for easy reference using update_session_data_field
+                logger.info(f"Bureau result: {bureau_result}")
+                
+                # Save the extracted bureau decision details to session data
                 if session_id:
                     SessionManager.update_session_data_field(session_id, "data.bureau_decision_details", bureau_result)
-                    # logger.info(f"Stored bureau decision details in session: {bureau_result}")
+                    logger.info(f"Session {session_id}: Saved bureau decision details to session data")
                 
                 # Format the response using the new function
                 formatted_response = self._format_bureau_decision_response(bureau_result, session_id)
@@ -1981,13 +1986,25 @@ CRITICAL CONTEXT AWARENESS RULES:
                 
                 return formatted_response
             
+            # Save the raw result as bureau decision details even if it's not a successful response
+            if session_id:
+                SessionManager.update_session_data_field(session_id, "data.bureau_decision_details", result)
+                logger.info(f"Session {session_id}: Saved raw bureau decision result to session data")
+            
             return json.dumps(result)
         except Exception as e:
             logger.error(f"Error getting bureau decision: {e}")
-            return json.dumps({
+            error_result = {
                 "status": 500,
                 "error": f"Error getting bureau decision: {str(e)}"
-            })
+            }
+            
+            # Save error information to session data
+            if session_id:
+                SessionManager.update_session_data_field(session_id, "data.bureau_decision_details", error_result)
+                logger.info(f"Session {session_id}: Saved bureau decision error to session data")
+            
+            return json.dumps(error_result)
 
     def extract_bureau_decision_details(self, bureau_result: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         """
@@ -1995,6 +2012,7 @@ CRITICAL CONTEXT AWARENESS RULES:
         
         Args:
             bureau_result: Bureau decision API response
+            session_id: Session identifier
             
         Returns:
             Dictionary with formatted bureau decision details
@@ -2005,7 +2023,9 @@ CRITICAL CONTEXT AWARENESS RULES:
                 "reason": None,
                 "maxEligibleEMI": None,
                 "emiPlans": [],
-                "creditLimitCalculated": None
+                "creditLimitCalculated": None,
+                "loanAmount": None,
+                "maxTreatmentAmount": None
             }
             
             if not isinstance(bureau_result, dict) or bureau_result.get("status") != 200:
@@ -2013,8 +2033,14 @@ CRITICAL CONTEXT AWARENESS RULES:
                 
             data = bureau_result.get("data", {})
             
-            # Extract status
-            if "status" in data:
+            # Handle nested structure where actual data is in data.data
+            if "data" in data and isinstance(data["data"], dict):
+                data = data["data"]
+            
+            # Extract status from multiple possible locations
+            if "finalDecision" in data:
+                details["status"] = data["finalDecision"]
+            elif "status" in data:
                 details["status"] = data["status"]
             elif "bureauDecision" in data:
                 details["status"] = data["bureauDecision"]
@@ -2022,8 +2048,22 @@ CRITICAL CONTEXT AWARENESS RULES:
             # Log the extracted status for debugging
             logger.info(f"Extracted bureau decision status: {details['status']}")
             
-            # Extract reason
-            if "reason" in data:
+            # Extract loan amount
+            if "loanAmount" in data:
+                details["loanAmount"] = data["loanAmount"]
+            
+            # Extract max eligible EMI
+            if "maxEligibleEmi" in data:
+                details["maxEligibleEMI"] = data["maxEligibleEmi"]
+            elif "maxEligibleEMI" in data:
+                details["maxEligibleEMI"] = data["maxEligibleEMI"]
+            elif "eligibleEMI" in data:
+                details["maxEligibleEMI"] = data["eligibleEMI"]
+            
+            # Extract reason from rejection reasons or other sources
+            if "rejectionReasons" in data and isinstance(data["rejectionReasons"], list) and len(data["rejectionReasons"]) > 0:
+                details["reason"] = ", ".join(data["rejectionReasons"])
+            elif "reason" in data:
                 details["reason"] = data["reason"]
             elif "decisionReason" in data:
                 details["reason"] = data["decisionReason"]
@@ -2034,14 +2074,7 @@ CRITICAL CONTEXT AWARENESS RULES:
                             details["reason"] = f"Failed {check['policyCheck']} check"
                             break
             
-            # Extract max eligible EMI
-            if "maxEligibleEMI" in data:
-                details["maxEligibleEMI"] = data["maxEligibleEMI"]
-            elif "eligibleEMI" in data:
-                details["maxEligibleEMI"] = data["eligibleEMI"]
-            
-            # Extract EMI plans and find max credit limit
-            # Support both "emiPlanList" (original API) and "emiPlans" (formatted result)
+            # Extract EMI plans and find max credit limit and treatment amount
             emi_plans_data = None
             if "emiPlanList" in data and isinstance(data["emiPlanList"], list):
                 emi_plans_data = data["emiPlanList"]
@@ -2051,16 +2084,29 @@ CRITICAL CONTEXT AWARENESS RULES:
             if emi_plans_data:
                 details["emiPlans"] = emi_plans_data
                 
-                # Find maximum creditLimit from all plans (note: field is "creditLimit" not "creditLimitCalculated")
+                # Find maximum creditLimit from all plans
                 try:
                     max_credit_limit = max(
-                        (float(plan.get("creditLimit", 0)) for plan in emi_plans_data if plan.get("creditLimit")),
+                        (float(plan.get("creditLimitCalculated", 0)) for plan in emi_plans_data if plan.get("creditLimitCalculated")),
                         default=None
                     )
                     if max_credit_limit:
                         details["creditLimitCalculated"] = str(int(max_credit_limit))
                 except (ValueError, TypeError):
                     pass
+                
+                # Find maximum treatment amount by getting the highest grossTreatmentAmount from all plans
+                try:
+                    max_treatment_amount = max(
+                        (float(plan.get("grossTreatmentAmount", 0)) for plan in emi_plans_data if plan.get("grossTreatmentAmount")),
+                        default=None
+                    )
+                    if max_treatment_amount:
+                        details["maxTreatmentAmount"] = str(int(max_treatment_amount))
+                except (ValueError, TypeError):
+                    pass
+
+                print(f"max_treatment_amount: {max_treatment_amount}")
                 
                 # If we have plans but no max eligible EMI, use the highest EMI
                 if not details["maxEligibleEMI"] and emi_plans_data:
@@ -2074,14 +2120,19 @@ CRITICAL CONTEXT AWARENESS RULES:
                     except (ValueError, TypeError):
                         pass
             
-            # Ensure credit limit, EMI, and down payment values are strings
+            # Ensure credit limit, EMI, down payment, and net loan amount values are strings
             for plan in details["emiPlans"]:
-                for key in ["creditLimit", "emi", "downPayment"]:
+                for key in ["creditLimitCalculated", "emi", "downPayment", "netLoanAmount"]:
                     if key in plan and plan[key] is not None and not isinstance(plan[key], str):
                         plan[key] = str(plan[key])
+                
+                # Ensure grossTreatmentAmount is available and is a string
+                if "grossTreatmentAmount" in plan and plan["grossTreatmentAmount"] is not None and not isinstance(plan["grossTreatmentAmount"], str):
+                    plan["grossTreatmentAmount"] = str(plan["grossTreatmentAmount"])
             
-            # # Log the complete details dictionary for debugging
-            # logger.info(f"Extracted bureau decision details: {details}")
+            # Log the complete details dictionary for debugging
+            logger.info(f"Extracted bureau decision details: {details}")
+
             
             return details
         except Exception as e:
@@ -2091,7 +2142,9 @@ CRITICAL CONTEXT AWARENESS RULES:
                 "reason": None,
                 "maxEligibleEMI": None,
                 "emiPlans": [],
-                "creditLimit": None
+                "creditLimitCalculated": None,
+                "loanAmount": None,
+                "maxTreatmentAmount": None
             }
 
     def process_prefill_data_for_basic_details(self, session_id: str) -> str:
@@ -2265,10 +2318,11 @@ CRITICAL CONTEXT AWARENESS RULES:
         Extract address information from prefill data and save it using save_address_details.
         Looks for 'Primary' address type and extracts postal code (pincode) and address line.
         If pincode is available, calls state_and_city_by_pincode API to get accurate city and state.
+        If pincode is missing, returns a special status to ask user for pincode.
         If state is not found from API, use state from prefill data, but if it's a code, crosswalk to real state name using pincode.
 
         Args:
-            input_str: JSON string with userId or userId and prefill_data
+            session_id: Session identifier
 
         Returns:
             Save result as JSON string
@@ -2423,99 +2477,116 @@ CRITICAL CONTEXT AWARENESS RULES:
                     address_data["pincode"] = primary_address.get("Postal", "")
                     address_data["state"] = primary_address.get("State", "")
 
-                    # Clean up the pincode if needed (ensure it's a 6-digit code)
-                    if address_data["pincode"] and len(address_data["pincode"]) > 0:
-                        # Make sure it's 6 digits (if shorter, pad with zeros)
-                        pincode = address_data["pincode"].strip()
-                        if pincode.isdigit() and len(pincode) <= 6:
-                            address_data["pincode"] = pincode.zfill(6)
+                    # Check if pincode is missing or invalid
+                    if not address_data["pincode"] or not address_data["pincode"].strip():
+                        # Return special status to ask for pincode
+                        return json.dumps({
+                            "status": "missing_pincode",
+                            "message": "Please provide your 6-digit pincode to continue with the loan application process. Follow workflow A",
+                            "extracted_address_data": address_data
+                        })
 
-                            # If we have a valid pincode, get city and state from API
-                            try:
-                                pincode_data = self.api_client.state_and_city_by_pincode(address_data["pincode"])
-                                logger.info(f"Pincode API response for pincode {address_data['pincode']}: {pincode_data}")
-                                city_set = False
-                                state_set = False
-                                if pincode_data and pincode_data.get("status") == "success":
-                                    # Only update if we get valid non-null data
-                                    if pincode_data.get("city") and pincode_data["city"] is not None:
-                                        address_data["city"] = pincode_data["city"]
-                                        city_set = True
-                                    if pincode_data.get("state") and pincode_data["state"] is not None:
-                                        address_data["state"] = pincode_data["state"]
-                                        state_set = True
-                                # If state is not set from API, use state from prefill data, but crosswalk code if needed
-                                if not state_set:
-                                    prefill_state = primary_address.get("State", "")
-                                    # If prefill_state is a code, map to name
-                                    state_name = STATE_CODE_TO_NAME.get(prefill_state.strip().upper())
-                                    if state_name:
-                                        address_data["state"] = state_name
-                                    else:
-                                        # If not a code, try to use as is, but if still not a valid state, use pincode mapping
-                                        if prefill_state and len(prefill_state) <= 3:
-                                            # Try pincode mapping
-                                            state_from_pin = get_state_from_pincode(address_data["pincode"])
-                                            if state_from_pin:
-                                                address_data["state"] = state_from_pin
-                                            else:
-                                                address_data["state"] = prefill_state
-                                        elif prefill_state:
-                                            address_data["state"] = prefill_state
-                                        else:
-                                            # As last resort, use pincode mapping
-                                            state_from_pin = get_state_from_pincode(address_data["pincode"])
-                                            if state_from_pin:
-                                                address_data["state"] = state_from_pin
-                                # If city is not set from API, use last word of address as city
-                                if not city_set:
-                                    address_str = address_data.get("address", "")
-                                    if address_str:
-                                        # Split address by whitespace and take last word
-                                        address_words = address_str.strip().split()
-                                        if address_words:
-                                            # Save city in title case
-                                            address_data["city"] = address_words[-1].title()
-                            except Exception as e:
-                                logger.warning(f"Failed to get city/state from pincode API: {e}")
-                                # If API call fails, try to set city from address as fallback
-                                address_str = address_data.get("address", "")
-                                if address_str:
-                                    address_words = address_str.strip().split()
-                                    if address_words:
-                                        address_data["city"] = address_words[-1].title()
-                                # For state, use prefill state or pincode mapping
-                                prefill_state = primary_address.get("State", "")
-                                state_name = STATE_CODE_TO_NAME.get(prefill_state.strip().upper())
-                                if state_name:
-                                    address_data["state"] = state_name
-                                else:
+                    # Clean up the pincode if needed (ensure it's a 6-digit code)
+                    pincode = address_data["pincode"].strip()
+                    if not pincode.isdigit() or len(pincode) != 6:
+                        # Return special status to ask for valid pincode
+                        return json.dumps({
+                            "status": "invalid_pincode",
+                            "message": "Please provide a valid 6-digit pincode to continue with the loan application process. Follow workflow A",
+                            "extracted_address_data": address_data
+                        })
+
+                    address_data["pincode"] = pincode
+
+                    # If we have a valid pincode, get city and state from API
+                    try:
+                        pincode_data = self.api_client.state_and_city_by_pincode(address_data["pincode"])
+                        logger.info(f"Pincode API response for pincode {address_data['pincode']}: {pincode_data}")
+                        city_set = False
+                        state_set = False
+                        if pincode_data and pincode_data.get("status") == "success":
+                            # Only update if we get valid non-null data
+                            if pincode_data.get("city") and pincode_data["city"] is not None:
+                                address_data["city"] = pincode_data["city"]
+                                city_set = True
+                            if pincode_data.get("state") and pincode_data["state"] is not None:
+                                address_data["state"] = pincode_data["state"]
+                                state_set = True
+                        # If state is not set from API, use state from prefill data, but crosswalk code if needed
+                        if not state_set:
+                            prefill_state = primary_address.get("State", "")
+                            # If prefill_state is a code, map to name
+                            state_name = STATE_CODE_TO_NAME.get(prefill_state.strip().upper())
+                            if state_name:
+                                address_data["state"] = state_name
+                            else:
+                                # If not a code, try to use as is, but if still not a valid state, use pincode mapping
+                                if prefill_state and len(prefill_state) <= 3:
+                                    # Try pincode mapping
                                     state_from_pin = get_state_from_pincode(address_data["pincode"])
                                     if state_from_pin:
                                         address_data["state"] = state_from_pin
-                                    elif prefill_state:
+                                    else:
                                         address_data["state"] = prefill_state
+                                elif prefill_state:
+                                    address_data["state"] = prefill_state
+                                else:
+                                    # As last resort, use pincode mapping
+                                    state_from_pin = get_state_from_pincode(address_data["pincode"])
+                                    if state_from_pin:
+                                        address_data["state"] = state_from_pin
+                        # If city is not set from API, use last word of address as city
+                        if not city_set:
+                            address_str = address_data.get("address", "")
+                            if address_str:
+                                # Split address by whitespace and take last word
+                                address_words = address_str.strip().split()
+                                if address_words:
+                                    # Save city in title case
+                                    address_data["city"] = address_words[-1].title()
+                    except Exception as e:
+                        logger.warning(f"Failed to get city/state from pincode API: {e}")
+                        # If API call fails, try to set city from address as fallback
+                        address_str = address_data.get("address", "")
+                        if address_str:
+                            address_words = address_str.strip().split()
+                            if address_words:
+                                address_data["city"] = address_words[-1].title()
+                        # For state, use prefill state or pincode mapping
+                        prefill_state = primary_address.get("State", "")
+                        state_name = STATE_CODE_TO_NAME.get(prefill_state.strip().upper())
+                        if state_name:
+                            address_data["state"] = state_name
+                        else:
+                            state_from_pin = get_state_from_pincode(address_data["pincode"])
+                            if state_from_pin:
+                                address_data["state"] = state_from_pin
+                            elif prefill_state:
+                                address_data["state"] = prefill_state
 
-                    logger.info(f"Extracted address data: {address_data}")
+                logger.info(f"Extracted address data: {address_data}")
 
-                    # Store the extracted address data in session
-                    if session_id:
-                        SessionManager.update_session_data_field(session_id, "data.extracted_address_data", address_data)
+                # Store the extracted address data in session
+                if session_id:
+                    SessionManager.update_session_data_field(session_id, "data.extracted_address_data", address_data)
 
-                    # Save the address details
-                    result = self.api_client.save_address_details(user_id, address_data)
-                    permanent_result = self.api_client.save_permanent_address_details(user_id, address_data)
-                    logger.info(f"Permanent address details saved: {permanent_result}")
+                # Save the address details
+                result = self.api_client.save_address_details(user_id, address_data)
+                permanent_result = self.api_client.save_permanent_address_details(user_id, address_data)
+                logger.info(f"Permanent address details saved: {permanent_result}")
 
-                    # Store the API response
-                    if session_id:
-                        SessionManager.update_session_data_field(session_id, "data.api_responses.process_address_data", result)
+                # Store the API response
+                if session_id:
+                    SessionManager.update_session_data_field(session_id, "data.api_responses.process_address_data", result)
 
-                    return json.dumps(result)
-                else:
-                    return json.dumps({"error": "No address found in prefill data"})
+                return json.dumps(result)
             else:
-                return json.dumps({"error": "Prefill data doesn't contain address information in expected format"})
+                # No address found in prefill data, ask for pincode
+                return json.dumps({
+                    "status": "missing_pincode",
+                    "message": "Please provide your 6-digit pincode to continue with the loan application process. Follow workflow A",
+                    "extracted_address_data": {}
+                })
 
         except Exception as e:
             logger.error(f"Error processing address data: {e}")
@@ -2674,6 +2745,14 @@ CRITICAL CONTEXT AWARENESS RULES:
         """
         import json
         try:
+            # Helper function to detect limit options prompt
+            def is_limit_options_prompt(text: str) -> bool:
+                return (
+                    "Continue with this limit" in text
+                    and "Continue with limit enhancement" in text
+                    and ("1." in text and "2." in text)
+                )
+            
             session = SessionManager.get_session_from_db(session_id)
             if not session:
                 logger.error(f"Session {session_id} not found")
@@ -2689,8 +2768,22 @@ CRITICAL CONTEXT AWARENESS RULES:
             # This is stored in session data to remember where we are in the collection flow
             collection_step = session["data"].get("collection_step", "employment_type")
             
+            # If no collection step is set, check if we should start with limit options
+            if not collection_step:
+                # Check if the session has limit options in the history
+                session_history = session.get("history", [])
+                for hist_item in reversed(session_history[-5:]):  # Check last 5 messages
+                    if isinstance(hist_item, dict) and hist_item.get("type") == "AIMessage":
+                        content = hist_item.get("content", "")
+                        if is_limit_options_prompt(content):
+                            collection_step = "limit_options"
+                            SessionManager.update_session_data_field(session_id, "data.collection_step", "limit_options")
+                            logger.info(f"Session {session_id}: Detected limit options in history, setting collection step to limit_options")
+                            break
+            
             # Log current step for debugging
             logger.info(f"Session {session_id}: Processing step '{collection_step}' with message: {message.strip()}")
+            logger.info(f"Session {session_id}: Current collection step from session data: {session['data'].get('collection_step', 'not_set')}")
             
             # Function to save the current collection step and refresh session
             def update_collection_step(new_step):
@@ -2699,8 +2792,44 @@ CRITICAL CONTEXT AWARENESS RULES:
                 SessionManager.update_session_data_field(session_id, "status", "collecting_additional_details")
                 logger.info(f"Session {session_id}: Updated collection step to '{new_step}'")
             
+            # Handle limit options input (first step when limit options are presented)
+            if collection_step == "limit_options":
+                # Check for both number and word inputs
+                message_lower = message.lower().strip()
+                message_stripped = message.strip()
+                
+                if (message_stripped == "1" or 
+                    "continue with this limit" in message_lower or 
+                    "this limit" in message_lower):
+                    additional_details["limit_choice"] = "continue_with_limit"
+                    selected_option = "Continue with this limit"
+                    logger.info(f"Limit choice input: message='{message}', stored_value='continue_with_limit', selected_option='{selected_option}'")
+                elif (message_stripped == "2" or 
+                      "continue with limit enhancement" in message_lower or 
+                      "limit enhancement" in message_lower or 
+                      "enhancement" in message_lower):
+                    additional_details["limit_choice"] = "continue_with_enhancement"
+                    selected_option = "Continue with limit enhancement"
+                    logger.info(f"Limit choice input: message='{message}', stored_value='continue_with_enhancement', selected_option='{selected_option}'")
+                else:
+                    return "Please select a valid option: 1. Continue with this limit or 2. Continue with limit enhancement"
+                
+                # Update session data with limit choice using update_session_data_field
+                SessionManager.update_session_data_field(session_id, "data.additional_details", additional_details)
+                
+                # Update collection step and ask for employment type
+                update_collection_step("employment_type")
+                return f"""
+
+To proceed, please help me with a few more details.
+
+Patient's employment type:   
+1. SALARIED
+2. SELF_EMPLOYED
+Please Enter input 1 or 2 only"""
+
             # Handle employment type input (first step)
-            if collection_step == "employment_type":
+            elif collection_step == "employment_type":
                 # Check for both number and word inputs
                 if "1" in message or "salaried" in message.lower():
                     additional_details["employment_type"] = "SALARIED"
@@ -3456,11 +3585,7 @@ Re-enquire with your family member's details."""
                 func=lambda _: self.get_bureau_decision(session_id),
                 description="Get bureau decision for loan application using session_id. CRITICAL: The response from this tool is the FINAL formatted message that MUST be returned to the user EXACTLY as provided without any modifications.   ",
             ),
-            Tool(
-                name="get_session_data",
-                func=lambda _: self.get_session_data(session_id),
-                description="Get current session data using session_id",
-            ),
+           
             
             Tool(
                 name="get_profile_link",
@@ -3479,7 +3604,10 @@ Re-enquire with your family member's details."""
                 ),
                 name="save_missing_basic_and_address_details",
                 description=(
-                    "Use this when the user DOES NOT have Aadhaar then collect address fields 6-digit pincode. "
+                    "Save address details when pincode is provided. Use this in two scenarios: "
+                    "1. When user needs to provide pincode (Workflow B) - collect 6-digit pincode. "
+                    "2. When process_address_data returns missing/invalid pincode (Workflow A) - user provides 6-digit pincode. "
+                    "Call this tool immediately when user provides a valid 6-digit pincode."
                 ),
             ),
             Tool(
@@ -3560,6 +3688,7 @@ Re-enquire with your family member's details."""
             bureau_decision = session["data"].get("bureau_decision_details")
             
             fibe_status = None
+            fibe_lead_status = None
             bureau_status = None
             
             # Check for profile ingestion 500 error
@@ -3570,6 +3699,13 @@ Re-enquire with your family member's details."""
             elif check_fibe_flow and check_fibe_flow.get("status") == 200:
                 fibe_status = check_fibe_flow.get("data")
                 logger.info(f"Session {session_id}: Fibe status: {fibe_status}")
+            
+            # Extract FIBE lead status from profile ingestion response
+            if profile_ingestion and profile_ingestion.get("status") == 200:
+                ingestion_data = profile_ingestion.get("data", {})
+                if isinstance(ingestion_data, dict):
+                    fibe_lead_status = ingestion_data.get("leadStatus")
+                    logger.info(f"Session {session_id}: FIBE lead status from profile ingestion: {fibe_lead_status}")
             
             # Extract bureau status
             if bureau_decision:
@@ -3586,13 +3722,34 @@ Re-enquire with your family member's details."""
                     logger.info(f"  - Raw status value: '{bureau_status}'")
             else:
                 logger.warning(f"Session {session_id}: No bureau decision found in session data")
+                logger.info(f"Session {session_id}: Available session data keys: {list(session['data'].keys()) if 'data' in session else 'No data'}")
+                logger.info(f"Session {session_id}: API responses keys: {list(api_responses.keys()) if api_responses else 'No API responses'}")
+                
+                # Check if bureau decision is stored in api_responses
+                api_bureau_decision = api_responses.get("get_bureau_decision")
+                if api_bureau_decision:
+                    logger.info(f"Session {session_id}: Found bureau decision in api_responses: {api_bureau_decision}")
+                    # Try to extract and save it
+                    if isinstance(api_bureau_decision, dict) and api_bureau_decision.get("status") == 200:
+                        extracted_bureau = self.extract_bureau_decision_details(api_bureau_decision, session_id)
+                        SessionManager.update_session_data_field(session_id, "data.bureau_decision_details", extracted_bureau)
+                        logger.info(f"Session {session_id}: Extracted and saved bureau decision from api_responses")
+                        bureau_decision = extracted_bureau
+                        bureau_status = bureau_decision.get("status")
             
             # Apply decision flow logic
             decision_status = None
             link_to_use = profile_link
             
+            # 0. If both FIBE lead status and Bureau are REJECTED -> REJECTED
+            if (fibe_lead_status and fibe_lead_status.upper() == "REJECTED" and 
+                bureau_status and (bureau_status.upper() == "REJECTED" or "rejected" in bureau_status.lower())):
+                decision_status = "REJECTED"
+                link_to_use = profile_link
+                logger.info(f"Session {session_id}: FIBE lead status REJECTED + Bureau REJECTED -> REJECTED")
+            
             # 1. If Fibe GREEN -> APPROVED with Fibe link
-            if fibe_status == "GREEN":
+            elif fibe_status == "GREEN":
                 decision_status = "APPROVED"
                 link_to_use = fibe_link if fibe_link else profile_link
                 logger.info(f"Session {session_id}: Fibe GREEN -> APPROVED with Fibe link")
@@ -3610,11 +3767,18 @@ Re-enquire with your family member's details."""
                     link_to_use = fibe_link if fibe_link else profile_link
                     logger.info(f"Session {session_id}: Fibe AMBER + Bureau INCOME_VERIFICATION_REQUIRED -> INCOME_VERIFICATION_REQUIRED with Fibe link")
                     logger.info(f"Session {session_id}: Matched INCOME_VERIFICATION_REQUIRED condition")
-                # If bureau REJECTED -> INCOME_VERIFICATION_REQUIRED with Fibe link (changed as per new rule)
+                # If bureau REJECTED -> INCOME_VERIFICATION_REQUIRED with Fibe link (only if FIBE lead status is not REJECTED)
                 elif bureau_status and (bureau_status.upper() == "REJECTED" or "rejected" in bureau_status.lower()):
-                    decision_status = "INCOME_VERIFICATION_REQUIRED"
-                    link_to_use = fibe_link if fibe_link else profile_link
-                    logger.info(f"Session {session_id}: Fibe AMBER + Bureau REJECTED -> INCOME_VERIFICATION_REQUIRED with Fibe link (per new rule)")
+                    # Only apply this rule if FIBE lead status is not REJECTED
+                    if not fibe_lead_status or fibe_lead_status.upper() != "REJECTED":
+                        decision_status = "INCOME_VERIFICATION_REQUIRED"
+                        link_to_use = fibe_link if fibe_link else profile_link
+                        logger.info(f"Session {session_id}: Fibe AMBER + Bureau REJECTED -> INCOME_VERIFICATION_REQUIRED with Fibe link (FIBE lead status not REJECTED)")
+                    else:
+                        # If FIBE lead status is also REJECTED, this case should have been handled by the first condition
+                        decision_status = "REJECTED"
+                        link_to_use = profile_link
+                        logger.info(f"Session {session_id}: Fibe AMBER + Bureau REJECTED + FIBE lead REJECTED -> REJECTED")
                 # Otherwise -> INCOME_VERIFICATION_REQUIRED with Fibe link
                 else:
                     decision_status = "INCOME_VERIFICATION_REQUIRED"
@@ -3655,7 +3819,7 @@ Re-enquire with your family member's details."""
                 logger.info(f"Session {session_id}: Fell through to final PENDING condition - fibe_status: '{fibe_status}', bureau_status: '{bureau_status}'")
             
             logger.info(f"Session {session_id}: Final decision - Status: {decision_status}, Link: {link_to_use}")
-            logger.info(f"Session {session_id}: Decision logic summary - Fibe: {fibe_status}, Bureau: {bureau_status}, Final: {decision_status}")
+            logger.info(f"Session {session_id}: Decision logic summary - Fibe: {fibe_status}, FIBE Lead Status: {fibe_lead_status}, Bureau: {bureau_status}, Final: {decision_status}")
             
             return {
                 "status": decision_status,
@@ -3849,63 +4013,17 @@ Continue your journey with the link here:\n\n
             
             # Format response based on status (case-insensitive)
             if status and status.upper() == "APPROVED":
-                if show_detailed_approval:
-                    # Get loan amount from bureau decision
-                    loan_amount = bureau_decision.get("loanAmount", 0)
-                    
-                    # Try to get down payment and gross treatment amount from emiPlans
-                    emi_plans = bureau_decision.get("emiPlanList", [])
-                    down_payment = treatment_cost - 100000
-                    gross_treatment_amount = 100000
-                    
+                
+                    max_treatment_amount = bureau_decision.get("maxTreatmentAmount", 0)
                     try:
-                        if emi_plans and isinstance(emi_plans, list) and len(emi_plans) > 0:
-                            first_plan = emi_plans[0]
-                            if isinstance(first_plan, dict):
-                                # Get down payment from first plan
-                                down_payment = first_plan.get("downPayment", 0)
-                                # If gross treatment amount is not in plan, use loan amount
-                                if not first_plan.get("grossTreatmentAmount"):
-                                    gross_treatment_amount = loan_amount
-                                else:
-                                    gross_treatment_amount = first_plan.get("grossTreatmentAmount")
-                    except Exception as e:
-                        logger.error(f"Error processing EMI plan details: {e}")
-                    
-                    # Ensure numeric values for formatting
-                    try:
-                        gross_treatment_amount = float(str(gross_treatment_amount).replace(',', '').replace('₹', '')) if gross_treatment_amount else 0
+                        max_treatment_amount = float(str(max_treatment_amount).replace(',', '').replace('₹', '')) if max_treatment_amount else 0
                     except (ValueError, TypeError):
-                        gross_treatment_amount = 0
+                        max_treatment_amount = 0
                     
-                    try:
-                        down_payment = float(str(down_payment).replace(',', '').replace('₹', '')) if down_payment else 0
-                    except (ValueError, TypeError):
-                        down_payment = 0
-                    
-                    return f"""
-🎉 Congratulations, {patient_name}! Patient's loan application has been **APPROVED**.
-
-**Approval Details:**
-- Gross Treatment Amount: ₹{gross_treatment_amount:,.0f}
-- DownPayment: ₹{down_payment:,.0f}
-
-Would you like to proceed without down payment? If yes, income verification will be required.
-
-Patient's employment type:  
-1. SALARIED
-2. SELF_EMPLOYED
-Please Enter input 1 or 2 only"""
-                else:
-                    # Ensure numeric value for credit limit formatting
-                    credit_limit = bureau_decision.get("creditLimitCalculated", 0)
-                    try:
-                        credit_limit = float(str(credit_limit).replace(',', '').replace('₹', '')) if credit_limit else 0
-                    except (ValueError, TypeError):
-                        credit_limit = 0
-                    
-                    return f"""
-🎉 Congratulations, {patient_name}! Patient's loan application has been **APPROVED**.
+                    # Check if max_treatment_amount is greater than or equal to treatment_cost
+                    if max_treatment_amount >= treatment_cost:
+                        return f"""
+🎉 Congratulations, Patient {patient_name} is eligible ✅ for a loan up to ₹{max_treatment_amount:,.0f} 
 
 To proceed, please help me with a few more details.
 
@@ -3913,7 +4031,14 @@ Patient's employment type:
 1. SALARIED
 2. SELF_EMPLOYED
 Please Enter input 1 or 2 only"""
-            
+                    else:
+                        return f"""
+We were only able to approve payment plans
+for a treatment amount up to
+₹{max_treatment_amount:,.0f}
+
+1. Continue with this limit
+2. Continue with limit enhancement"""
             elif status and status.upper() == "REJECTED":
                 # Check if doctor is mapped with FIBE
                 doctor_id = session["data"].get("doctorId") or session["data"].get("doctor_id")
@@ -4088,12 +4213,14 @@ Please Enter input 1 or 2 only"""
         session_id: str,
     ) -> dict:
         """
-        Save DOB, gender, and address when Aadhaar is not available, then continue workflow steps.
+        Save address details when pincode is provided, then continue workflow steps.
+        This can be called in two scenarios:
+        1. When user needs to provide pincode (Workflow B)
+        2. When process_address_data returns missing/invalid pincode (Workflow A)
 
-        - Validates: DOB (DD/MM/YYYY), gender (Male/Female/Other or 1/2/3), address_line1, city, state, 6-digit pincode
-        - Saves basic details (DOB, gender)
+        - Validates: 6-digit pincode
         - Saves address details (and permanent address if API available)
-        - Continues with: pan_verification using session_id -> get_employment_verification -> save_employment_details -> get_bureau_decision
+        - Continues with: process_prefill_data_for_basic_details -> pan_verification using session_id -> get_employment_verification -> save_employment_details -> get_bureau_decision
         """
         try:
             session = SessionManager.get_session_from_db(session_id)
@@ -4104,20 +4231,26 @@ Please Enter input 1 or 2 only"""
             if not user_id:
                 return {"status": "error", "message": "User ID missing in session"}
 
-            # Validate inputs
-            
-
-           
+            # Validate pincode
             if not pincode or not re.match(r"^\d{6}$", pincode.strip()):
                 return {"status": "error", "message": "Pincode must be a 6-digit number."}
 
+            # Check if we have extracted address data from process_address_data
+            extracted_address_data = session.get("data", {}).get("extracted_address_data", {})
             
-
-            # Prepare and enrich address
+            # Prepare and enrich address data
             address_data = {
                 "pincode": pincode.strip(),
                 "formStatus": "Address",
             }
+            
+            # If we have extracted address data, merge it with the pincode
+            if extracted_address_data:
+                address_data.update(extracted_address_data)
+                # Ensure pincode from user input takes precedence
+                address_data["pincode"] = pincode.strip()
+            
+            # Enrich address data with city and state from pincode API
             try:
                 if len(address_data["pincode"]) == 6:
                     pincode_info = self.api_client.state_and_city_by_pincode(address_data["pincode"]) or {}
@@ -4129,6 +4262,7 @@ Please Enter input 1 or 2 only"""
             except Exception:
                 pass
 
+            # Save address details
             addr_resp = self.api_client.save_address_details(user_id, address_data)
             if isinstance(addr_resp, str):
                 try:
@@ -4145,12 +4279,15 @@ Please Enter input 1 or 2 only"""
             except Exception:
                 pass
 
+            # Store the API response
+            SessionManager.update_session_data_field(session_id, "data.api_responses.save_missing_address_details", addr_resp)
+
             return {
                 "status": "success",
-                "message": "Details saved and workflow continued.",
+                "message": "Address details saved successfully. according to workflow continue the next step",
             }
         except Exception as e:
-            logger.error(f"Error in save_missing_address_details: {e}", exc_info=True)
+            logger.error(f"Error in save_missing_basic_and_address_details: {e}", exc_info=True)
             return {"status": "error", "message": "Failed to save details. Please try again."}
 
     
