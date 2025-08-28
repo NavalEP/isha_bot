@@ -4023,8 +4023,8 @@ Continue your journey with the link here:\n\n
                     # Check if max_treatment_amount is greater than or equal to treatment_cost
                     if max_treatment_amount >= treatment_cost:
                         return f"""
-🎉 Congratulations, {patient_name} is eligible ✅ for a no-cost EMI
-payment plan for amount up to ₹{max_treatment_amount:,.0f}.
+🎉 Congratulations {patient_name} is eligible ✅ for a no-cost EMI
+payment plan for amount up to ₹{max_treatment_amount:,.0f}
 
 To proceed, please help me with a few more details.
 
