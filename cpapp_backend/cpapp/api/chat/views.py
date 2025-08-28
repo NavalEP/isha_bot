@@ -21,6 +21,7 @@ from django.conf import settings
 from cpapp.models.session_data import SessionData
 from uuid import UUID
 from django.core.exceptions import ObjectDoesNotExist
+from django.db import models
 
 logger = logging.getLogger(__name__)
 
@@ -274,7 +275,7 @@ class UserDetailsView(APIView):
     """
     View for retrieving user details from session data and API calls
     """
-    # authentication_classes = [JWTAuthentication]
+    authentication_classes = [JWTAuthentication]
 
     def get(self, request, session_uuid):
         """
@@ -844,6 +845,90 @@ class DoctorSessionsView(APIView):
             
         except Exception as e:
             logger.error(f"Error getting doctor sessions: {e}")
+            return Response({
+                "status": "error",
+                "message": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PatientSessionView(APIView):
+    """
+    View for finding patient sessions by phone number
+    """
+    # authentication_classes = [JWTAuthentication]
+    
+    def get(self, request):
+        """
+        Get patient sessions by phone number
+        
+        Args:
+            request: Django request object with phone_number query parameter
+            
+        Returns:
+            JSON response containing matching sessions with session_id and status
+        """
+        try:
+            # Check if user is authenticated
+            if not request.user or request.user == 'AnonymousUser':
+                return Response({
+                    "status": "error",
+                    "message": "Authentication required"
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            # Get phone_number from query parameters
+            phone_number = request.GET.get('phone_number')
+            
+            if not phone_number:
+                return Response({
+                    "status": "error",
+                    "message": "phone_number parameter is required"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Validate phone number format (10 digits)
+            if not phone_number.isdigit() or len(phone_number) != 10:
+                return Response({
+                    "status": "error",
+                    "message": "phone_number must be a 10-digit number"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Search for sessions where phone_number exists in session data
+            # We need to search in the JSON data field for phoneNumber or mobileNumber
+            sessions = SessionData.objects.filter(
+                models.Q(data__phoneNumber=phone_number) |
+                models.Q(data__mobileNumber=phone_number) |
+                models.Q(phone_number=phone_number)
+            ).order_by('-created_at')
+            
+            # Format the response
+            session_list = []
+            for session in sessions:
+                # Extract doctor information from session data
+                session_data_dict = session.data or {}
+                doctor_id = session_data_dict.get('doctor_id') or session_data_dict.get('doctorId')
+                doctor_name = session_data_dict.get('doctor_name') or session_data_dict.get('doctorName')
+                
+                session_data = {
+                    "session_id": str(session.session_id),
+                    "application_id": str(session.application_id),
+                    "status": session.status,
+                    "created_at": session.created_at.isoformat() if session.created_at else None,
+                    "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+                    "phone_number": phone_number,
+                    "doctorId": doctor_id,
+                    "doctorName": doctor_name
+                }
+                session_list.append(session_data)
+            
+            logger.info(f"Found {len(session_list)} sessions for phone_number: {phone_number}")
+            
+            return Response({
+                "status": "success",
+                "phone_number": phone_number,
+                "total_sessions": len(session_list),
+                "sessions": session_list
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error getting patient sessions: {e}")
             return Response({
                 "status": "error",
                 "message": str(e)

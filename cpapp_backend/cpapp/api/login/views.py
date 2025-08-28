@@ -3,6 +3,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from cpapp.services.api_client import CarepayAPIClient
 from django.conf import settings
+from cpapp.models.session_data import SessionData
+from django.db import models
 import jwt
 import datetime
 
@@ -47,11 +49,58 @@ class VerifyOtpView(APIView):
         doctor_id = request.data.get('doctorId')
         doctor_name = request.data.get('doctorName')
         
-        if not phone_number or not otp or not doctor_id or not doctor_name:
+        if not phone_number or not otp:
             return Response(
-                {"error": "Phone number, OTP, doctor ID, and doctor name are required"}, 
+                {"error": "Phone number and OTP are required"}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
+        
+        # If doctor_id and doctor_name are not provided, try to find them from existing sessions
+        if not doctor_id or not doctor_name:
+            try:
+                # Search for sessions where phone_number exists in session data
+                sessions = SessionData.objects.filter(
+                    models.Q(data__phoneNumber=phone_number) |
+                    models.Q(data__mobileNumber=phone_number) |
+                    models.Q(phone_number=phone_number)
+                ).order_by('-created_at')
+                
+                if sessions.exists():
+                    # Get the most recent session
+                    latest_session = sessions.first()
+                    session_data_dict = latest_session.data or {}
+                    
+                    # Extract doctor information from session data
+                    found_doctor_id = session_data_dict.get('doctor_id') or session_data_dict.get('doctorId')
+                    found_doctor_name = session_data_dict.get('doctor_name') or session_data_dict.get('doctorName')
+                    
+                    # Use found doctor information if available
+                    if found_doctor_id and found_doctor_name:
+                        doctor_id = found_doctor_id
+                        doctor_name = found_doctor_name
+                        print(f"Found doctor info from session: doctor_id={doctor_id}, doctor_name={doctor_name}")
+                    else:
+                        # If no doctor info found in sessions, require them to be provided
+                        if not doctor_id or not doctor_name:
+                            return Response(
+                                {"error": "Doctor ID and doctor name are required. No existing sessions found with this phone number."}, 
+                                status=status.HTTP_400_BAD_REQUEST
+                            )
+                else:
+                    # If no sessions found, require doctor info to be provided
+                    if not doctor_id or not doctor_name:
+                        return Response(
+                            {"error": "Doctor ID and doctor name are required. No existing sessions found with this phone number."}, 
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+            except Exception as e:
+                print(f"Error searching for existing sessions: {e}")
+                # If there's an error searching sessions, require doctor info to be provided
+                if not doctor_id or not doctor_name:
+                    return Response(
+                        {"error": "Doctor ID and doctor name are required"}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
             
         # Initialize the CarePay API client
         api_client = CarepayAPIClient()

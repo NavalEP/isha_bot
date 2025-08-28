@@ -405,6 +405,51 @@ class GetAllChildClinicsView(BaseLoanAPIView):
             'message': result.get('message', 'Failed to fetch child clinics')
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+class GetDoctorDashboardDataView(BaseLoanAPIView):
+    """Get doctor dashboard data including leads, approval rates, and statistics"""
+    
+    def get(self, request):
+        doctor_id = request.GET.get('doctorId')
+        start_date = request.GET.get('startDate', '')
+        end_date = request.GET.get('endDate', '')
+        
+        if not doctor_id:
+            return Response({
+                'status': 400,
+                'message': 'doctorId parameter is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            result = self.api_client.get_doctor_dashboard_data(doctor_id, start_date, end_date)
+            
+            if result and result.get('status') == 200:
+                return Response({
+                    'status': 200,
+                    'data': result.get('data', {}),
+                    'attachment': None,
+                    'message': 'Doctor dashboard data retrieved successfully'
+                })
+            
+            # Handle error cases
+            error_message = result.get('message', 'Failed to fetch doctor dashboard data') if result else 'No response from external API'
+            logger.error(f"Error fetching doctor dashboard data for doctor {doctor_id}: {error_message}")
+            
+            return Response({
+                'status': 500,
+                'data': None,
+                'attachment': None,
+                'message': error_message
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+        except Exception as e:
+            logger.error(f"Exception in get_doctor_dashboard_data for doctor {doctor_id}: {str(e)}")
+            return Response({
+                'status': 500,
+                'data': None,
+                'attachment': None,
+                'message': f'Internal server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class GetLoanDetailsByUserIdView(BaseLoanAPIView):
     """Get loan details by user ID"""
     
@@ -449,6 +494,48 @@ class GetLoanDetailsByUserIdView(BaseLoanAPIView):
             
         except Exception as e:
             logger.error(f"Exception in get_loan_details_by_user_id for user {user_id}: {str(e)}")
+            return Response({
+                'status': 500,
+                'data': None,
+                'attachment': None,
+                'message': f'Internal server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class GetDoctorProfileDetailsView(BaseLoanAPIView):
+    """Get clinic name by doctor ID"""
+    
+    def get(self, request):
+        doctor_id = request.GET.get('doctorId')
+        if not doctor_id:
+            return Response({
+                'status': 400,
+                'message': 'doctorId parameter is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            clinic_name = self.api_client.get_doctor_profile_details(doctor_id)
+            
+            if clinic_name:
+                return Response({
+                    'status': 200,
+                    'data': {
+                        'clinicName': clinic_name,
+                        'doctorId': doctor_id
+                    },
+                    'attachment': None,
+                    'message': 'Clinic name retrieved successfully'
+                })
+            
+            # Handle case when clinic name is not found
+            return Response({
+                'status': 404,
+                'data': None,
+                'attachment': None,
+                'message': 'Clinic name not found for the provided doctor ID'
+            }, status=status.HTTP_404_NOT_FOUND)
+            
+        except Exception as e:
+            logger.error(f"Exception in get_doctor_profile_details for doctor {doctor_id}: {str(e)}")
             return Response({
                 'status': 500,
                 'data': None,

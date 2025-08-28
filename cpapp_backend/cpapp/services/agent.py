@@ -59,7 +59,8 @@ class CarepayAgent:
         - When a user provides a treatment reason (e.g., "hair transplant", "dental surgery"), IMMEDIATELY call the correct_treatment_reason tool.
         - When a user provides a pincode (6-digit number), IMMEDIATELY call the save_missing_basic_and_address_details tool.
         - CRITICAL: When you have just asked for missing details (like gender) and the user responds with that information, you MUST call save_gender_details tool. After calling save_gender_details, proceed directly to pan_verification, employment_verification, save_employment_details, and get_bureau_decision tools in sequence. Do NOT call save_basic_details again after save_gender_details.
-        - after calling save_missing_basic_and_address_details, According Workflow A or B continue the next step
+        - CRITICAL: After calling save_missing_basic_and_address_details tool, DO NOT call save_basic_details tool again. Follow the workflow sequence directly.
+        - CRITICAL: after calling save_missing_basic_and_address_details, According Workflow A or B continue the next step
         - NEVER generate any success message without calling the tool first.
         - NEVER modify, truncate, or duplicate any formatted messages. Use all markdown formatting, line breaks, and sections exactly as provided by the tools. Do NOT add, merge, or change any text or formatting.
         - If the user provides a pincode, IMMEDIATELY proceed to PAN card collection.
@@ -141,7 +142,9 @@ class CarepayAgent:
         - Only STOP after get_bureau_decision or if treatmentCost < ₹3,000 or Juspay Cardless is ELIGIBLE.
         - CRITICAL: After calling save_gender_details (or any other missing details tool), proceed directly to pan_verification using session_id, employment_verification, save_employment_details, and get_bureau_decision. Do NOT call save_basic_details again.
         - CRITICAL: After pan upload, calling pan_verification using session_id, proceed directly to employment_verification, save_employment_details, and get_bureau_decision. Do NOT call save_basic_details again.
-        - CRITICAL: After calling save_missing_basic_and_address_details (when pincode is provided), proceed directly to process_prefill_data_for_basic_details, pan_verification using session_id, employment_verification, save_employment_details, and get_bureau_decision. Do NOT call process_address_data again.
+        - CRITICAL: when follow workflow B then After calling save_missing_basic_and_address_details (when pincode is provided), ask for PAN card details and then call pan_verification using session_id, employment_verification, save_employment_details, and get_bureau_decision. Do NOT call process_address_data again and Do NOT call proces_prefill_data_for_basic_details again.
+        - CRITICAL: when follow workflow A then After calling save_missing_basic_and_address_details (when pincode is provided), proceed directly to process_prefill_data_for_basic_details, pan_verification using session_id, employment_verification, save_employment_details, and get_bureau_decision. Do NOT call process_address_data again.
+        
 
         ----
 
@@ -150,6 +153,8 @@ class CarepayAgent:
         Trigger:
         - Use this ONLY when `get_prefill_data` returns status 500 with error "phoneToPrefill_failed" OR when prefill data is empty (all important fields like pan, name, income, gender, age, dob are empty).
         - NEVER mix with Workflow A.
+        - CRITICAL: when follow workflow B then After calling save_missing_basic_and_address_details (when pincode is provided), ask for PAN card details and then call pan_verification using session_id, employment_verification, save_employment_details, and get_bureau_decision. Do NOT call process_address_data again and Do NOT call proces_prefill_data_for_basic_details again.
+        
 
         State Flags (internal):
         - pan_verified = false
@@ -164,7 +169,7 @@ class CarepayAgent:
 
         Step 2: PAN Card Collection
         - Ask: "Please provide Patient's PAN card details. You can either:\n\n**Upload Patient's PAN card** by clicking the file upload button below\n**Enter Patient's PAN card number manually** (10-character alphanumeric code)\n\n"
-        - IF user provides a PAN number → handle_pan_card_number → then ask for date of birth (DD-MM-YYYY) and call save by correct_date_of_birth tool → then ask for gender: "Please select Patient's gender:\n1. Male\n2. Female\n" and wait for user response, then call save_gender_B_details
+        - IF user provides a PAN number → handle_pan_card_number → then ask for date of birth (DD-MM-YYYY) and call save by correct_date_of_birth tool → then must ask for gender: "Please select Patient's gender:\n1. Male\n2. Female\n" and wait for user response, then call save_gender_B_details
         - IF user uploads PAN card → wait for upload confirmation message(PAN card processed successfully) → then ask: "Please select Patient's gender:\n1. Male\n2. Female\n" and wait for user response, then call save_gender_B_details
         - After PAN is saved and additional details collected, continue with Step 3
       
@@ -2426,6 +2431,30 @@ CRITICAL CONTEXT AWARENESS RULES:
                             return state_name
             return None
 
+        def is_valid_pincode(pincode):
+            """Check if a string is a valid 6-digit pincode"""
+            if not pincode:
+                return False
+            # Clean the pincode string
+            clean_pincode = ''.join(filter(str.isdigit, str(pincode)))
+            return len(clean_pincode) == 6 and clean_pincode.isdigit()
+
+        def extract_pincode_from_postal(postal):
+            """Extract valid pincode from postal field"""
+            if not postal:
+                return None
+            # Clean the postal string and extract digits
+            clean_postal = ''.join(filter(str.isdigit, str(postal)))
+            if len(clean_postal) == 6:
+                return clean_postal
+            # If we have more than 6 digits, try to find 6-digit sequence
+            if len(clean_postal) > 6:
+                for i in range(len(clean_postal) - 5):
+                    potential_pincode = clean_postal[i:i+6]
+                    if potential_pincode.isdigit():
+                        return potential_pincode
+            return None
+
         try:
             if not session_id:
                 return "Session ID is required"
@@ -2459,26 +2488,50 @@ CRITICAL CONTEXT AWARENESS RULES:
             if isinstance(prefill_data, dict) and "address" in prefill_data and isinstance(prefill_data["address"], list):
                 address_list = prefill_data["address"]
                 primary_address = None
+                valid_pincode = None
 
                 # First, try to find address with Type "Primary" or "Permanent"
                 for addr in address_list:
                     addr_type = addr.get("Type", "").lower()
                     if addr_type in ["primary", "permanent"]:
                         primary_address = addr
-                        break
+                        # Check if this address has a valid pincode
+                        postal = addr.get("Postal", "")
+                        extracted_pincode = extract_pincode_from_postal(postal)
+                        if is_valid_pincode(extracted_pincode):
+                            valid_pincode = extracted_pincode
+                            break
 
-                # If no primary address found, use the first one in the list
+                # If no primary address with valid pincode found, search all addresses for valid pincode
+                if not valid_pincode:
+                    for addr in address_list:
+                        postal = addr.get("Postal", "")
+                        extracted_pincode = extract_pincode_from_postal(postal)
+                        if is_valid_pincode(extracted_pincode):
+                            primary_address = addr
+                            valid_pincode = extracted_pincode
+                            break
+
+                # If still no valid pincode found, use the first address in the list
                 if not primary_address and address_list:
                     primary_address = address_list[0]
 
                 if primary_address:
                     # Extract address details
                     address_data["address"] = primary_address.get("Address", "")
-                    address_data["pincode"] = primary_address.get("Postal", "")
+                    
+                    # Use the valid pincode we found, or try to extract from current address
+                    if valid_pincode:
+                        address_data["pincode"] = valid_pincode
+                    else:
+                        postal = primary_address.get("Postal", "")
+                        extracted_pincode = extract_pincode_from_postal(postal)
+                        address_data["pincode"] = extracted_pincode if extracted_pincode else ""
+
                     address_data["state"] = primary_address.get("State", "")
 
                     # Check if pincode is missing or invalid
-                    if not address_data["pincode"] or not address_data["pincode"].strip():
+                    if not address_data["pincode"] or not is_valid_pincode(address_data["pincode"]):
                         # Return special status to ask for pincode
                         return json.dumps({
                             "status": "missing_pincode",
@@ -2486,16 +2539,8 @@ CRITICAL CONTEXT AWARENESS RULES:
                             "extracted_address_data": address_data
                         })
 
-                    # Clean up the pincode if needed (ensure it's a 6-digit code)
+                    # Clean up the pincode
                     pincode = address_data["pincode"].strip()
-                    if not pincode.isdigit() or len(pincode) != 6:
-                        # Return special status to ask for valid pincode
-                        return json.dumps({
-                            "status": "invalid_pincode",
-                            "message": "Please provide a valid 6-digit pincode to continue with the loan application process. Follow workflow A",
-                            "extracted_address_data": address_data
-                        })
-
                     address_data["pincode"] = pincode
 
                     # If we have a valid pincode, get city and state from API
@@ -3916,67 +3961,7 @@ Continue your journey with the link here:\n\n
             SessionManager.update_session_data_field(session_id, "data.juspay_cardless_status", "ERROR")
             return {"status": "EXCEPTION", "message": "An unexpected error occurred while checking Juspay Cardless eligibility."}
 
-    def _validate_and_handle_early_chain_finish(self, session_id: str, response: Dict[str, Any], ai_message: str) -> None:
-        """
-        Validate that all required steps were executed and handle early chain finish
-        
-        Args:
-            session_id: Session identifier
-            response: Agent response
-            ai_message: AI response message
-        """
-        try:
-            # Get session to check current state
-            session = SessionManager.get_session_from_db(session_id)
-            if not session:
-                return
-            
-            # Check if we're in initial data collection phase (no userId yet)
-            if session.get("status") == "active" and not session.get("data", {}).get("userId"):
-                # This is initial data collection, check if all required steps were executed
-                executed_tools = []
-                if "intermediate_steps" in response:
-                    executed_tools = [step[0].tool for step in response["intermediate_steps"]]
-                
-                # Define required steps for initial flow
-                required_steps = [
-                    "store_user_data",
-                    "get_user_id_from_phone_number", 
-                    "save_basic_details",
-                    "save_loan_details",
-                    "check_jp_cardless",
-                    "get_prefill_data",
-                    "process_prefill_data",
-                    "process_address_data",
-                    "pan_verification",
-                    "get_employment_verification",
-                    "save_employment_details",
-                    "get_bureau_decision"
-                ]
-                
-                # Check for missing critical steps
-                missing_critical_steps = []
-                for step in required_steps[:5]:  # Check first 5 critical steps
-                    if step not in executed_tools:
-                        missing_critical_steps.append(step)
-                
-                # Only log if we have some tools executed but missing critical ones
-                if len(executed_tools) > 0 and missing_critical_steps:
-                    logger.warning(f"Session {session_id}: Early chain finish detected. Missing steps: {missing_critical_steps}")
-                    logger.warning(f"Session {session_id}: Executed tools: {executed_tools}")
-                    
-                    # Log this for debugging
-                    SessionManager.update_session_data_field(session_id, "data.early_chain_finish", {
-                        "timestamp": datetime.now().isoformat(),
-                        "missing_steps": missing_critical_steps,
-                        "executed_tools": executed_tools,
-                        "ai_message": ai_message
-                    })
-                    
-        except Exception as e:
-            logger.error(f"Error in early chain finish validation: {e}")
-
-
+    
     def _format_bureau_decision_response(self, bureau_decision: Dict[str, Any], session_id: str) -> str:
         """
         Format the bureau decision response based on the status and details
@@ -4222,6 +4207,8 @@ Please Enter input 1 or 2 only"""
         - Validates: 6-digit pincode
         - Saves address details (and permanent address if API available)
         - Continues with: process_prefill_data_for_basic_details -> pan_verification using session_id -> get_employment_verification -> save_employment_details -> get_bureau_decision
+        - CRITICAL: when follow workflow A then After calling save_missing_basic_and_address_details (when pincode is provided), proceed directly to process_prefill_data_for_basic_details, pan_verification using session_id, employment_verification, save_employment_details, and get_bureau_decision. Do NOT call process_address_data again.
+        - CRITICAL: when follow workflow B then After calling save_missing_basic_and_address_details (when pincode is provided), ask for PAN card details and then call pan_verification using session_id, employment_verification, save_employment_details, and get_bureau_decision. Do NOT call process_address_data again.
         """
         try:
             session = SessionManager.get_session_from_db(session_id)
