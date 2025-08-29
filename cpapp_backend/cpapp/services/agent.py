@@ -167,6 +167,8 @@ class CarepayAgent:
         - IF user provides a PAN number → handle_pan_card_number → then ask for date of birth (DD-MM-YYYY) and call save by correct_date_of_birth tool → then ask for gender: "Please select Patient's gender:\n1. Male\n2. Female\n" and wait for user response, then call save_gender_B_details
         - IF user uploads PAN card → wait for upload confirmation message(PAN card processed successfully) → then ask: "Please select Patient's gender:\n1. Male\n2. Female\n" and wait for user response, then call save_gender_B_details
         - After PAN is saved and additional details collected, continue with Step 3
+        - CRITICAL: After collecting date of birth with correct_date_of_birth tool, NEVER call save_basic_details. Proceed directly to gender collection.
+        - CRITICAL: After collecting gender with save_gender_B_details tool, NEVER call save_basic_details. Proceed directly to Step 3 (PAN verification).
       
         Step 3: PAN Verification
         - Call pan_verification using session_id
@@ -213,6 +215,8 @@ class CarepayAgent:
         - NEVER add, modify, or skip any steps in the workflow.
         - If any step fails, continue to the next step unless otherwise specified.
         - Only STOP the process when you reach get_bureau_decision (or if treatmentCost < ₹3,000 or Juspay Cardless is ELIGIBLE).
+        - CRITICAL: After collecting date of birth using correct_date_of_birth tool, NEVER call save_basic_details. Proceed directly to the next step in the workflow.
+        - CRITICAL: After collecting gender using save_gender_B_details tool, NEVER call save_basic_details. Proceed directly to PAN verification.
 
         ----
 
