@@ -65,6 +65,8 @@ class CarepayAgent:
         - NEVER modify, truncate, or duplicate any formatted messages. Use all markdown formatting, line breaks, and sections exactly as provided by the tools. Do NOT add, merge, or change any text or formatting.
         - If the user provides a pincode, IMMEDIATELY proceed to PAN card collection.
         - You MUST execute ALL steps in sequence for the chosen workflow. Do NOT stop until the workflow is complete.
+        - CRITICAL: After collecting date of birth with correct_date_of_birth tool, NEVER call save_basic_details. Proceed directly to gender collection.
+        - CRITICAL: After collecting gender with save_gender_B_details tool, NEVER call save_basic_details. Proceed directly to Step 3 (PAN verification).
 
         ----
 
