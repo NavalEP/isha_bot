@@ -283,6 +283,7 @@ class CarepayAPIClient:
         
         result = self._make_request('GET', endpoint, params=params)
         
+        
         return result
 
     def get_profile_completion_link(self, doctor_id: str = None) -> Dict[str, Any]:

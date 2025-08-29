@@ -233,11 +233,14 @@ class LoanAPIClient:
         
         return self._make_request("getAllLoanDetailForDoctorNew", params=params)
     
-    def get_loan_count_and_amount_for_doctor(self, doctor_id: str, clinic_name: str = '') -> Optional[Dict]:
+    def get_loan_count_and_amount_for_doctor(self, doctor_id: str, clinic_name: str = '', 
+                                           start_date: str = '', end_date: str = '') -> Optional[Dict]:
         """Get loan count and amount statistics for doctor"""
         params = {
             'doctorId': doctor_id,
-            'clinicName': clinic_name
+            'clinicName': clinic_name,
+            'startDate': start_date,
+            'endDate': end_date
         }
         return self._make_request("getLoanCountAndAmountForDoctor", params=params)
     
@@ -261,6 +264,29 @@ class LoanAPIClient:
             'userId': user_id
         }
         return self._make_request("userDetails/getLoanDetailsByUserId", params=params)
+    
+    def get_doctor_dashboard_data(self, doctor_id: str, start_date: str = '', end_date: str = '') -> Optional[Dict]:
+        """Get doctor dashboard data including leads, approval rates, and statistics"""
+        params = {
+            'doctorId': doctor_id,
+            'startDate': start_date,
+            'endDate': end_date
+        }
+        return self._make_request("getDoctorDashboardData", params=params)
+    
+    def get_doctor_profile_details(self, doctor_id: str) -> Optional[str]:
+        """Get clinic name by doctor ID"""
+        params = {
+            'doctorId': doctor_id
+        }
+        response = self._make_request("getDoctorProfDetailsByDoctorId", params=params)
+        
+        if response and response.get('status') == 200:
+            data = response.get('data', {})
+            return data.get('clinicName')
+        else:
+            logger.error(f"Failed to get doctor profile details for doctor_id: {doctor_id}")
+            return None
     
     def get_matching_emi_plans(self, user_id: str, loan_id: str) -> Dict[str, Any]:
         """
