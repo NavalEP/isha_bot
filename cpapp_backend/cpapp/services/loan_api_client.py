@@ -10,7 +10,7 @@ class LoanAPIClient:
     """Client for making requests to the external loan API"""
     
     def __init__(self):
-        self.base_url = "https://uatbackend.carepay.money"
+        self.base_url = "https://backend.carepay.money"
         self.timeout = 30
         self.session = requests.Session()
         
@@ -233,11 +233,14 @@ class LoanAPIClient:
         
         return self._make_request("getAllLoanDetailForDoctorNew", params=params)
     
-    def get_loan_count_and_amount_for_doctor(self, doctor_id: str, clinic_name: str = '') -> Optional[Dict]:
+    def get_loan_count_and_amount_for_doctor(self, doctor_id: str, clinic_name: str = '', 
+                                           start_date: str = '', end_date: str = '') -> Optional[Dict]:
         """Get loan count and amount statistics for doctor"""
         params = {
             'doctorId': doctor_id,
-            'clinicName': clinic_name
+            'clinicName': clinic_name,
+            'startDate': start_date,
+            'endDate': end_date
         }
         return self._make_request("getLoanCountAndAmountForDoctor", params=params)
     

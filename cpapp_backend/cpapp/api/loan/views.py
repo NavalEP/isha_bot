@@ -313,12 +313,16 @@ class LoanCountAndAmountView(BaseLoanAPIView):
                 'message': 'doctorId parameter is required'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Get optional clinic name parameter
+        # Get optional parameters
         clinic_name = request.GET.get('clinicName', '')
+        start_date = request.GET.get('startDate', '')
+        end_date = request.GET.get('endDate', '')
         
         result = self.api_client.get_loan_count_and_amount_for_doctor(
             doctor_id=doctor_id,
-            clinic_name=clinic_name
+            clinic_name=clinic_name,
+            start_date=start_date,
+            end_date=end_date
         )
         
         if result and result.get('status') == 200:
