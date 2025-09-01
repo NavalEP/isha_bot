@@ -3299,8 +3299,15 @@ Patient's 6-digit business location pincode"""
                 else:
                     logger.warning(f"Session {session_id}: Doctor ID not found in session data. Skipping FIBE flow.")
 
+                # Get user ID from session data
+                session = SessionManager.get_session_from_db(session_id)
+                user_id = session.get("data", {}).get("userId", "") if session else ""
+                
                 # Determine which link to return - always fallback to profile_link if fibe_link_to_display is None
+                profile_link = f"https://uat.carepay.money/patient/bureauapproved/{user_id}"
+                fibe_link_to_display = f"https://uat.carepay.money/patient/fibeLoanApproved/{user_id}"
                 link_to_display = fibe_link_to_display if fibe_link_to_display else profile_link
+
 
                 # Use the new centralized decision logic
                 decision_result = self._determine_loan_decision(session_id, profile_link, fibe_link_to_display)
