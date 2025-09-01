@@ -246,7 +246,7 @@ class CarepayAgent:
             initial_message = (
                 "Hello! I'm **Careena 👩🏻‍⚕️**. I'm here to help you check Patient's eligibility for a medical loan.\n\n"
                 "To get started, please share the following details:\n\n"
-                "1. Patient's full name\n"
+                "1. Patient's full name (As on Aadhaar Card)\n"
                 "2. Patient's phone number (linked to their PAN)\n"
                 "3. Expected cost of the treatment\n"
                 "4. Patient's monthly income\n"
