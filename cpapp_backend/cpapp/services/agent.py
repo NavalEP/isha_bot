@@ -954,6 +954,34 @@ CRITICAL CONTEXT AWARENESS RULES:
                 self._update_session_history(session_id, message, ai_message)
                 return ai_message
 
+            # Handle post-approval address details flow when additional_details_completed
+            if current_status == "additional_details_completed":
+                logger.info(f"Session {session_id}: Handling post-approval address details flow")
+                ai_message = self._handle_post_approval_address_details(session_id, message)
+                self._update_session_history(session_id, message, ai_message)
+                return ai_message
+
+            # Handle KYC pending status
+            if current_status == "kyc_pending":
+                logger.info(f"Session {session_id}: Handling KYC pending status")
+                ai_message = self._handle_kyc_pending_status(session_id, message)
+                self._update_session_history(session_id, message, ai_message)
+                return ai_message
+
+            # Handle KYC completed status
+            if current_status == "kyc_completed":
+                logger.info(f"Session {session_id}: Handling KYC completed status")
+                ai_message = self._handle_kyc_completed_status(session_id, message)
+                self._update_session_history(session_id, message, ai_message)
+                return ai_message
+
+            # Handle loan disbursal ready status
+            if current_status == "loan_disbursal_ready":
+                logger.info(f"Session {session_id}: Handling loan disbursal ready status")
+                ai_message = self._handle_loan_disbursal_ready_status(session_id, message)
+                self._update_session_history(session_id, message, ai_message)
+                return ai_message
+
             logger.info(f"Session {session_id}: Using full agent executor (status: {current_status})")
             session_tools = self._create_session_aware_tools(session_id)
 
@@ -3390,6 +3418,295 @@ Re-enquire with your family member's details."""
             logger.error(f"Error getting profile completion link: {e}")
             fallback_url = "https://carepay.money/patient/Gurgaon/Nikhil_Dental_Clinic/Nikhil_Salkar/e71779851b144d1d9a25a538a03612fc/"
             return Helper.clean_url(fallback_url)
+
+    def _handle_post_approval_address_details(self, session_id: str, message: str) -> str:
+        """
+        Handle post-approval address details flow and KYC status transition
+        
+        Args:
+            session_id: Session identifier
+            message: User message
+            
+        Returns:
+            Response message with payment plan details and KYC link
+        """
+        try:
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                logger.error(f"Session {session_id} not found")
+                return "Session not found. Please start a new conversation."
+            
+            # Get user ID from session data
+            user_id = session.get("data", {}).get("userId", "")
+            if not user_id:
+                logger.error(f"User ID not found in session {session_id}")
+                return "User information not found. Please start a new conversation."
+            
+            # Get patient name from session data
+            patient_name = session.get("data", {}).get("fullName", "")
+            if not patient_name:
+                # Try to get from ocr_result if fullName is not available
+                ocr_result = session.get("data", {}).get("ocr_result", {})
+                patient_name = ocr_result.get("name", "")
+            
+            # Construct the post-approval address details URL
+            post_approval_url = f"https://uat.carepay.money/patient/postapprovalAddressdetails/{user_id}"
+            
+            # Check if this is a repeated payment plan message
+            message_lower = message.lower()
+            if "payment plan summary" in message_lower or "effective tenure" in message_lower or "emi amount" in message_lower:
+                # This is a repeated payment plan message, provide a shorter response
+                response_message = f"""I see you've shared the payment plan details again. 
+
+You're currently in the KYC verification step. Please click the link below to complete your KYC:
+
+{post_approval_url}
+
+Once KYC is completed, let me know by saying "KYC completed" or "done"."""
+            else:
+                # Get payment plan details from session data
+                payment_plan = session.get("data", {}).get("payment_plan", {})
+                
+                # Construct the response message with payment plan details
+                response_message = f"""Payment Plan Summary:
+
+Effective tenure: {payment_plan.get('effective_tenure', 'N/A')} months
+EMI amount: ₹{payment_plan.get('emi_amount', 'N/A')}
+Processing fees: ₹{payment_plan.get('processing_fees', 'N/A')} ({payment_plan.get('processing_fees_percentage', 'N/A')}%)
+Advance payment: ₹{payment_plan.get('advance_payment', 'N/A')}
+Subvention: {payment_plan.get('subvention_percentage', 'N/A')}% (₹{payment_plan.get('subvention_amount', 'N/A')})
+
+You must collect ₹{payment_plan.get('amount_to_collect', 'N/A')} as advance EMI payment from the patient.
+
+Payment is now just 2 steps away:
+• KYC
+• Approve EMI auto payment
+
+Now, let's complete the KYC. Click on the button below to proceed.
+
+{post_approval_url}"""
+            
+            # Update status to KYC pending
+            SessionManager.update_session_data_field(session_id, "status", "kyc_pending")
+            SessionManager.update_session_data_field(session_id, "data.kyc_initiated_at", datetime.now().isoformat())
+            
+            logger.info(f"Session {session_id}: Updated status to kyc_pending and provided post-approval address details link")
+            
+            return response_message
+            
+        except Exception as e:
+            logger.error(f"Error handling post-approval address details: {e}")
+            return "There was an error processing your request. Please try again."
+
+    def _handle_kyc_pending_status(self, session_id: str, message: str) -> str:
+        """
+        Handle KYC pending status and provide guidance
+        
+        Args:
+            session_id: Session identifier
+            message: User message
+            
+        Returns:
+            Response message with KYC guidance
+        """
+        try:
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                logger.error(f"Session {session_id} not found")
+                return "Session not found. Please start a new conversation."
+            
+            # Get user ID from session data
+            user_id = session.get("data", {}).get("userId", "")
+            if not user_id:
+                logger.error(f"User ID not found in session {session_id}")
+                return "User information not found. Please start a new conversation."
+            
+            # Get patient name from session data
+            patient_name = session.get("data", {}).get("fullName", "")
+            if not patient_name:
+                # Try to get from ocr_result if fullName is not available
+                ocr_result = session.get("data", {}).get("ocr_result", {})
+                patient_name = ocr_result.get("name", "")
+            
+            # Construct the post-approval address details URL
+            post_approval_url = f"https://uat.carepay.money/patient/postapprovalAddressdetails/{user_id}"
+            
+            # Check if user is asking about KYC completion or has completed KYC
+            message_lower = message.lower()
+            
+            # Check if this is a payment plan summary message (repeated message)
+            if "payment plan summary" in message_lower or "effective tenure" in message_lower or "emi amount" in message_lower:
+                # This is a repeated payment plan message, provide a shorter response
+                return f"""I see you've shared the payment plan details again. 
+
+You're currently in the KYC verification step. Please click the link below to complete your KYC:
+
+{post_approval_url}
+
+Once KYC is completed, let me know by saying "KYC completed" or "done"."""
+            
+            elif any(keyword in message_lower for keyword in ["done", "completed", "finished", "kyc", "next", "proceed", "continue"]):
+                # Update status to KYC completed
+                SessionManager.update_session_data_field(session_id, "status", "kyc_completed")
+                SessionManager.update_session_data_field(session_id, "data.kyc_completed_at", datetime.now().isoformat())
+                
+                logger.info(f"Session {session_id}: Updated status to kyc_completed")
+                
+                return f"""Great! KYC has been completed successfully. 
+
+Now, let's proceed with the final step - approving EMI auto payment.
+
+Please click on the link below to complete the EMI auto payment approval:
+
+{post_approval_url}
+
+Once this is done, your loan will be ready for disbursal! 🎉"""
+            else:
+                # Provide guidance for KYC completion
+                return f"""I see you're in the KYC (Know Your Customer) verification step.
+
+To complete your loan application, please:
+
+1. **Complete KYC Verification**: Click on the link below to proceed with your KYC verification
+2. **Approve EMI Auto Payment**: After KYC completion, you'll need to approve the EMI auto payment
+
+Click here to start your KYC verification:
+
+{post_approval_url}
+
+Once you've completed the KYC process, please let me know by saying "KYC completed" or "done" and I'll guide you to the next step."""
+            
+        except Exception as e:
+            logger.error(f"Error handling KYC pending status: {e}")
+            return "There was an error processing your request. Please try again."
+
+    def _handle_kyc_completed_status(self, session_id: str, message: str) -> str:
+        """
+        Handle KYC completed status and final loan disbursal guidance
+        
+        Args:
+            session_id: Session identifier
+            message: User message
+            
+        Returns:
+            Response message with final loan disbursal guidance
+        """
+        try:
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                logger.error(f"Session {session_id} not found")
+                return "Session not found. Please start a new conversation."
+            
+            # Get user ID from session data
+            user_id = session.get("data", {}).get("userId", "")
+            if not user_id:
+                logger.error(f"User ID not found in session {session_id}")
+                return "User information not found. Please start a new conversation."
+            
+            # Get patient name from session data
+            patient_name = session.get("data", {}).get("fullName", "")
+            if not patient_name:
+                # Try to get from ocr_result if fullName is not available
+                ocr_result = session.get("data", {}).get("ocr_result", {})
+                patient_name = ocr_result.get("name", "")
+            
+            # Construct the post-approval address details URL
+            post_approval_url = f"https://carepay.money/patient/postapprovalAddressdetails/{user_id}"
+            
+            # Check if user is asking about EMI auto payment completion
+            message_lower = message.lower()
+            if any(keyword in message_lower for keyword in ["done", "completed", "finished", "emi", "payment", "approved", "next", "proceed", "continue"]):
+                # Update status to loan disbursal ready
+                SessionManager.update_session_data_field(session_id, "status", "loan_disbursal_ready")
+                SessionManager.update_session_data_field(session_id, "data.loan_disbursal_ready_at", datetime.now().isoformat())
+                
+                logger.info(f"Session {session_id}: Updated status to loan_disbursal_ready")
+                
+                return f"""🎉 Excellent! Your loan application has been completed successfully!
+
+**Loan Status: APPROVED & READY FOR DISBURSAL**
+
+Patient: {patient_name}
+Application Status: ✅ Complete
+KYC: ✅ Verified
+EMI Auto Payment: ✅ Approved
+
+Your loan will be disbursed shortly. You will receive a confirmation message once the funds are transferred to your account.
+
+Thank you for choosing CarePay for your healthcare financing needs! 
+
+If you have any questions about your loan disbursal, please contact our customer support team."""
+            else:
+                # Provide guidance for EMI auto payment completion
+                return f"""Great! I can see that KYC has been completed successfully.
+
+Now, let's complete the final step - **EMI Auto Payment Approval**.
+
+Please click on the link below to approve the EMI auto payment:
+
+{post_approval_url}
+
+Once you've completed the EMI auto payment approval, please let me know by saying "EMI approved" or "payment completed" and I'll confirm your loan is ready for disbursal! 🎉"""
+            
+        except Exception as e:
+            logger.error(f"Error handling KYC completed status: {e}")
+            return "There was an error processing your request. Please try again."
+
+    def _handle_loan_disbursal_ready_status(self, session_id: str, message: str) -> str:
+        """
+        Handle loan disbursal ready status - final confirmation
+        
+        Args:
+            session_id: Session identifier
+            message: User message
+            
+        Returns:
+            Response message with final confirmation
+        """
+        try:
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                logger.error(f"Session {session_id} not found")
+                return "Session not found. Please start a new conversation."
+            
+            # Get patient name from session data
+            patient_name = session.get("data", {}).get("fullName", "")
+            if not patient_name:
+                # Try to get from ocr_result if fullName is not available
+                ocr_result = session.get("data", {}).get("ocr_result", {})
+                patient_name = ocr_result.get("name", "")
+            
+            # Get payment plan details from session data
+            payment_plan = session.get("data", {}).get("payment_plan", {})
+            
+            return f"""🎉 **CONGRATULATIONS!** 🎉
+
+Your loan application has been **APPROVED** and is **READY FOR DISBURSAL**!
+
+**Loan Summary:**
+- Patient: {patient_name}
+- EMI Amount: ₹{payment_plan.get('emi_amount', 'N/A')}
+- Tenure: {payment_plan.get('effective_tenure', 'N/A')} months
+- Status: ✅ APPROVED & READY FOR DISBURSAL
+
+**What happens next:**
+1. Your loan will be disbursed within 24-48 hours
+2. You will receive an SMS/email confirmation
+3. The funds will be transferred to your registered bank account
+4. EMI payments will start as per the agreed schedule
+
+**Important Notes:**
+- Keep your EMI payment details handy
+- Ensure sufficient balance in your account on EMI due dates
+- Contact our support team if you have any questions
+
+Thank you for choosing CarePay for your healthcare financing needs! 
+
+Your loan journey is now complete! 🚀"""
+            
+        except Exception as e:
+            logger.error(f"Error handling loan disbursal ready status: {e}")
+            return "There was an error processing your request. Please try again."
 
     def _process_employment_data_from_additional_details(self, session_id: str) -> Dict[str, Any]:
         """
