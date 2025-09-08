@@ -10,7 +10,7 @@ class LoanAPIClient:
     """Client for making requests to the external loan API"""
     
     def __init__(self):
-        self.base_url = "https://uatbackend.carepay.money"
+        self.base_url = "https://backend.carepay.money"
         self.timeout = 30
         self.session = requests.Session()
         
@@ -123,7 +123,7 @@ class LoanAPIClient:
         params = {
             'loanId': loan_id,
             'test': '0',
-            'triggeredBy': 'admin'
+            'triggeredBy': 'user'
         }
         return self._make_request("bureauDecisionNew", params=params)
     
@@ -288,6 +288,14 @@ class LoanAPIClient:
             logger.error(f"Failed to get doctor profile details for doctor_id: {doctor_id}")
             return None
     
+    def get_user_address(self, user_id: str,type: str) -> Optional[Dict]:
+        """Get address for user"""
+        params = {
+            'userId': user_id,
+            'type': type
+        }
+        return self._make_request("userDetails/getUserAddressByUserId", params=params)
+    
     def get_matching_emi_plans(self, user_id: str, loan_id: str) -> Dict[str, Any]:
         """
         Get matching EMI plans by combining assigned product and bureau decision APIs
@@ -364,3 +372,88 @@ class LoanAPIClient:
                 'isApproved': False,
                 'assignedProductFailed': True
             }
+    
+    def save_loan_details(self, user_id: str, doctor_id: str, treatment_amount: float, 
+                         loan_amount: float, loan_emi: Optional[int] = None, 
+                         product_id: Optional[int] = None, internal_product_id: Optional[str] = None,
+                         advance_emi_amount: Optional[float] = None) -> Optional[Dict]:
+        """
+        Save loan details to the external API
+        
+        Args:
+            user_id: User ID (required)
+            doctor_id: Doctor ID (required)
+            treatment_amount: Treatment amount (required)
+            loan_amount: Loan amount (required)
+            loan_emi: Loan EMI (optional)
+            product_id: Product ID (optional)
+            internal_product_id: Internal product ID (optional)
+            advance_emi_amount: Advance EMI amount (optional)
+            
+        Returns:
+            API response data or None if request failed
+        """
+        # Prepare payload with required fields
+        payload = {
+            'userId': user_id,
+            'doctorId': doctor_id,
+            'treatmentAmount': treatment_amount,
+            'loanAmount': loan_amount
+        }
+        
+        # Add optional fields if provided
+        if loan_emi is not None:
+            payload['loanEMI'] = loan_emi
+        if product_id is not None:
+            payload['productId'] = product_id
+        if internal_product_id is not None:
+            payload['internalProductId'] = internal_product_id
+        if advance_emi_amount is not None:
+            payload['advanceEmiAmount'] = advance_emi_amount
+        
+        logger.info(f"SaveLoanDetails: Sending payload: {payload}")
+        
+        return self._make_request("userDetails/saveLoanDetails", 'POST', data=payload)
+
+    def get_all_findoc_districts(self) -> Optional[Dict]:
+        """
+        Get all finDoc districts from the external API
+        
+        Returns:
+            API response data or None if request failed
+        """
+        logger.info("GetAllFinDocDistricts: Fetching all finDoc districts")
+        
+        return self._make_request("finDoc/allFindocDistricts", 'GET')
+    
+    def save_address_details(self, user_id: str, address: str, address_type: str, 
+                           city: str, pincode: str, state: str) -> Optional[Dict]:
+        """
+        Save address details to the external API
+        
+        Args:
+            user_id: User ID (required)
+            address: Address string (required)
+            address_type: Type of address (required)
+            city: City name (required)
+            pincode: Pincode (required)
+            state: State name (required)
+            form_status: Form status (optional, defaults to "completed")
+            
+        Returns:
+            API response data or None if request failed
+        """
+        endpoint = "userDetails/addressDetail"
+        data = {
+            "address": address,
+            "addressType": address_type,
+            "city": city,
+            "formStatus": '',
+            "pincode": pincode,
+            "state": state,
+            "userId": user_id
+        }
+        
+        logger.info(f"SaveAddressDetails: Sending payload: {data}")
+        
+        return self._make_request(endpoint, 'POST', data=data)
