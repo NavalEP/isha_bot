@@ -3486,11 +3486,11 @@ Kindly confirm patient's address details by clicking below buttom.
                 # Get loan ID from save_loan_details in session data
                 save_loan_details = session_data.get("save_loan_details", {})
                 loan_data = save_loan_details.get("data", {})
-                loanId = loan_data.get("loanId", "") # Get loan ID from saved loan details
+                loan_i          d = loan_data.get("loanId", "") # Get loan ID from saved loan details
                 
-                logger.info(f"Session {session_id}: Retrieved loanId: {loanId}, userId: {user_id}")
+                logger.info(f"Session {session_id}: Retrieved loanId: {loan_id}, userId: {user_id}")
 
-                digilocker_response = self.api_client.create_digilocker_url(loanId)
+                digilocker_response = self.api_client.create_digilocker_url(loan_id)
                 
                 # Extract DigiLocker URL from response
                 adhaar_verification_url = ""
@@ -3500,10 +3500,10 @@ Kindly confirm patient's address details by clicking below buttom.
                 else:
                     logger.error(f"Session {session_id}: Failed to get DigiLocker URL. Response: {digilocker_response}")
                 
-                # Construct the URLs with proper loan ID and user ID
-                face_verification_url = f"https://carepay.money/patient/faceverification/{user_id}"
-                emi_autopay_url = f"https://carepay.money/patient/emiautopayintro/{loanId}"
-                agreement_esigning_url = f"https://carepay.money/patient/agreementesigning/{loanId}"
+                # Construct the URLs with proper loan ID and user ID - ensure loanId is not empty
+                face_verification_url = f"https://carepay.money/patient/faceverification/{user_id}" if user_id else "https://carepay.money/patient/faceverification/"
+                emi_autopay_url = f"https://carepay.money/patient/emiautopayintro/{loan_id}" if loan_id else "https://carepay.money/patient/emiautopayintro/"
+                agreement_esigning_url = f"https://carepay.money/patient/agreementesigning/{loan_id}" if loan_id else "https://carepay.money/patient/agreementesigning/"
                 
                 logger.info(f"Session {session_id}: Constructed URLs - Face: {face_verification_url}, EMI: {emi_autopay_url}, Agreement: {agreement_esigning_url}")
                 
