@@ -3484,9 +3484,14 @@ Kindly confirm patient's address details by clicking below buttom.
                 user_id = session_data.get("userId", "")
                 
                 # Get loan ID from save_loan_details in session data
-                save_loan_details = session_data.get("save_loan_details", {})
-                loan_data = save_loan_details.get("data", {})
-                loan_id = loan_data.get("loanId", "") # Get loan ID from saved loan details
+                loan_id = ""
+                if "api_responses" in session_data and "save_loan_details" in session_data["api_responses"]:
+                    save_loan_response = session_data["api_responses"]["save_loan_details"]
+                    logger.info(f"save_loan_details response: {save_loan_response}")
+                    if isinstance(save_loan_response, dict) and save_loan_response.get("status") == 200:
+                        if "data" in save_loan_response and isinstance(save_loan_response["data"], dict):
+                            loan_id = save_loan_response["data"].get("loanId")
+                            logger.info(f"Found loan_id in save_loan_details response: {loan_id}")
                 
                 logger.info(f"Session {session_id}: Retrieved loanId: {loan_id}, userId: {user_id}")
 
@@ -3517,19 +3522,19 @@ Kindly confirm patient's address details by clicking below buttom.
 
 Now, let's complete Adhaar verification.
 
-[Adhaar Verification]({adhaar_verification_url})
+[Adhaar Verification]{adhaar_verification_url}
 
 Now, let's complete face verification.
 
-[Face Verification]({face_verification_url})
+[Face Verification]{face_verification_url}
 
 Approve the EMI auto-pay setup.
 
-[EMI Auto-pay Setup]({emi_autopay_url})
+[EMI Auto-pay Setup]{emi_autopay_url}
 
 E-sign agreement using this link.
 
-[Agreement E-signing]({agreement_esigning_url})"""
+[Agreement E-signing]{agreement_esigning_url}"""
                 
                 # Update status to kyc_step
                 SessionManager.update_session_data_field(session_id, "status", "kyc_step")
