@@ -3481,13 +3481,24 @@ Kindly confirm patient's address details by clicking below buttom.
             if message.lower().strip() == "address details complete":
                 # Get session data to construct URLs with session ID
                 session_data = session.get("data", {})
-                user_id = session_data.get("userId", "13K0qggyBRLY9gQxw5ptRLiQVqtioCdh")  # fallback ID
+                user_id = session_data.get("userId", "")
+                
+                # Get loan ID from save_loan_details in session data
+                save_loan_details = session_data.get("save_loan_details", {})
+                loan_data = save_loan_details.get("data", {})
+                loanId = loan_data.get("loanId", "") # Get loan ID from saved loan details
+
+                digilocker_response = self.api_client.create_digilocker_url(loanId)
+                
+                # Extract DigiLocker URL from response
+                adhaar_verification_url = ""
+                if digilocker_response and digilocker_response.get("status") == 200:
+                    adhaar_verification_url = digilocker_response.get("data", "")
                 
                 # Construct the three URLs
-                adhaar_verification_url = f"https://carepay.money/patient/aadhaarnumberinput/{user_id}"
-                face_verification_url = f"https://carepay.money/patient/faceverified/{user_id}"
-                agreement_esigning_url = f"https://carepay.money/patient/agreementesigning/{user_id}"
-                emi_autopay_url = f"https://carepay.money/patient/emiautopayintro/{user_id}"
+                face_verification_url = f"https://carepay.money/patient/faceverification/{user_id}"
+                agreement_esigning_url = f"https://carepay.money/patient/agreementesigning/{loanId}"
+                emi_autopay_url = f"https://carepay.money/patient/emiautopayintro/{loanId}"
                 
                 # Create response with three different messages and URLs
                 response_message = f"""Payment is now just 4 steps away.

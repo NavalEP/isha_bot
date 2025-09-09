@@ -457,3 +457,21 @@ class LoanAPIClient:
         logger.info(f"SaveAddressDetails: Sending payload: {data}")
         
         return self._make_request(endpoint, 'POST', data=data)
+    
+    def get_disburse_data_by_loan_id(self, loan_id: str) -> Optional[Dict]:
+        """
+        Get disbursement data by loan ID
+        
+        Args:
+            loan_id: Loan ID (required)
+            
+        Returns:
+            API response data or None if request failed
+        """
+        params = {
+            'loanId': loan_id
+        }
+        
+        logger.info(f"GetDisburseDataByLoanId: Fetching disbursement data for loan_id: {loan_id}")
+        
+        return self._make_request("getDisburseDataByLoanId", params=params)
