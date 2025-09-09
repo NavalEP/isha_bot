@@ -3487,6 +3487,8 @@ Kindly confirm patient's address details by clicking below buttom.
                 save_loan_details = session_data.get("save_loan_details", {})
                 loan_data = save_loan_details.get("data", {})
                 loanId = loan_data.get("loanId", "") # Get loan ID from saved loan details
+                
+                logger.info(f"Session {session_id}: Retrieved loanId: {loanId}, userId: {user_id}")
 
                 digilocker_response = self.api_client.create_digilocker_url(loanId)
                 
@@ -3494,11 +3496,16 @@ Kindly confirm patient's address details by clicking below buttom.
                 adhaar_verification_url = ""
                 if digilocker_response and digilocker_response.get("status") == 200:
                     adhaar_verification_url = digilocker_response.get("data", "")
+                    logger.info(f"Session {session_id}: Retrieved DigiLocker URL: {adhaar_verification_url}")
+                else:
+                    logger.error(f"Session {session_id}: Failed to get DigiLocker URL. Response: {digilocker_response}")
                 
-                # Construct the three URLs
+                # Construct the URLs with proper loan ID and user ID
                 face_verification_url = f"https://carepay.money/patient/faceverification/{user_id}"
-                agreement_esigning_url = f"https://carepay.money/patient/agreementesigning/{loanId}"
                 emi_autopay_url = f"https://carepay.money/patient/emiautopayintro/{loanId}"
+                agreement_esigning_url = f"https://carepay.money/patient/agreementesigning/{loanId}"
+                
+                logger.info(f"Session {session_id}: Constructed URLs - Face: {face_verification_url}, EMI: {emi_autopay_url}, Agreement: {agreement_esigning_url}")
                 
                 # Create response with three different messages and URLs
                 response_message = f"""Payment is now just 4 steps away.
