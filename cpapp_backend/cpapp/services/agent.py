@@ -3486,7 +3486,7 @@ Kindly confirm patient's address details by clicking below buttom.
                 # Get loan ID from save_loan_details in session data
                 save_loan_details = session_data.get("save_loan_details", {})
                 loan_data = save_loan_details.get("data", {})
-                loan_i          d = loan_data.get("loanId", "") # Get loan ID from saved loan details
+                loan_id = loan_data.get("loanId", "") # Get loan ID from saved loan details
                 
                 logger.info(f"Session {session_id}: Retrieved loanId: {loan_id}, userId: {user_id}")
 
