@@ -802,3 +802,114 @@ class GetDisburseDataByLoanIdView(BaseLoanAPIView):
                 'attachment': None,
                 'message': f'Internal server error: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class UpdateProductDetailView(BaseLoanAPIView):
+    """Update product detail for a loan"""
+    
+    def get(self, request):
+        loan_id = request.GET.get('loanId')
+        product_id = request.GET.get('productId')
+        change_by = request.GET.get('changeBy', 'user')
+        
+        if not loan_id or not product_id:
+            return Response({
+                'status': 400,
+                'message': 'loanId and productId parameters are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            result = self.api_client.update_product_detail(loan_id, product_id, change_by)
+            
+            if result and result.get('status') == 200:
+                return Response({
+                    'status': 200,
+                    'data': result.get('data'),
+                    'attachment': result.get('attachment'),
+                    'message': result.get('message', 'Product detail updated successfully')
+                })
+            
+            # Handle error responses
+            error_message = result.get('message', 'Failed to update product detail') if result else 'No response from external API'
+            logger.error(f"Error updating product detail for loan {loan_id}: {error_message}")
+            
+            return Response({
+                'status': 500,
+                'data': None,
+                'attachment': None,
+                'message': error_message
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+        except Exception as e:
+            logger.error(f"Exception in update_product_detail for loan {loan_id}: {str(e)}")
+            return Response({
+                'status': 500,
+                'data': None,
+                'attachment': None,
+                'message': f'Internal server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class UpdateTreatmentAndLoanAmountView(BaseLoanAPIView):
+    """Update treatment and loan amount for a loan"""
+    
+    def get(self, request):
+        loan_id = request.GET.get('loanId')
+        treatment_amount = request.GET.get('treatmentAmount')
+        loan_amount = request.GET.get('loanAmount')
+        change_by = request.GET.get('changeBy', 'user')
+        
+        if not all([loan_id, treatment_amount, loan_amount]):
+            missing_fields = []
+            if not loan_id:
+                missing_fields.append('loanId')
+            if not treatment_amount:
+                missing_fields.append('treatmentAmount')
+            if not loan_amount:
+                missing_fields.append('loanAmount')
+            
+            return Response({
+                'status': 400,
+                'message': f'Missing required parameters: {", ".join(missing_fields)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            # Convert numeric fields to appropriate types
+            try:
+                treatment_amount = float(treatment_amount)
+                loan_amount = float(loan_amount)
+            except (ValueError, TypeError) as e:
+                return Response({
+                    'status': 400,
+                    'message': f'Invalid numeric value: {str(e)}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            result = self.api_client.update_treatment_and_loan_amount(
+                loan_id, treatment_amount, loan_amount, change_by
+            )
+            
+            if result and result.get('status') == 200:
+                return Response({
+                    'status': 200,
+                    'data': result.get('data'),
+                    'attachment': result.get('attachment'),
+                    'message': result.get('message', 'Treatment and loan amount updated successfully')
+                })
+            
+            # Handle error responses
+            error_message = result.get('message', 'Failed to update treatment and loan amount') if result else 'No response from external API'
+            logger.error(f"Error updating treatment and loan amount for loan {loan_id}: {error_message}")
+            
+            return Response({
+                'status': 500,
+                'data': None,
+                'attachment': None,
+                'message': error_message
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+        except Exception as e:
+            logger.error(f"Exception in update_treatment_and_loan_amount for loan {loan_id}: {str(e)}")
+            return Response({
+                'status': 500,
+                'data': None,
+                'attachment': None,
+                'message': f'Internal server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

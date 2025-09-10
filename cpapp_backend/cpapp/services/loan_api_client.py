@@ -475,3 +475,51 @@ class LoanAPIClient:
         logger.info(f"GetDisburseDataByLoanId: Fetching disbursement data for loan_id: {loan_id}")
         
         return self._make_request("getDisburseDataByLoanId", params=params)
+    
+    def update_product_detail(self, loan_id: str, product_id: str, change_by: str = 'user') -> Optional[Dict]:
+        """
+        Update product detail for a loan
+        
+        Args:
+            loan_id: Loan ID (required)
+            product_id: Product ID (required)
+            change_by: Who made the change (default: 'user')
+            
+        Returns:
+            API response data or None if request failed
+        """
+        params = {
+            'loanId': loan_id,
+            'productId': product_id,
+            'changeBy': change_by
+        }
+        
+        logger.info(f"UpdateProductDetail: Updating product detail for loan_id: {loan_id}, product_id: {product_id}")
+        
+        return self._make_request("updateProductDetail", params=params)
+    
+    def update_treatment_and_loan_amount(self, loan_id: str, treatment_amount: float, 
+                                       loan_amount: float, change_by: str = 'user') -> Optional[Dict]:
+        """
+        Update treatment and loan amount for a loan
+        
+        Args:
+            loan_id: Loan ID (required)
+            treatment_amount: Treatment amount (required)
+            loan_amount: Loan amount (required)
+            change_by: Who made the change (default: 'user')
+            
+        Returns:
+            API response data or None if request failed
+        """
+        params = {
+            'loanId': loan_id,
+            'treatmentAmount': treatment_amount,
+            'loanAmount': loan_amount,
+            'changeBy': change_by
+        }
+        
+        logger.info(f"UpdateTreatmentAndLoanAmount: Updating amounts for loan_id: {loan_id}, "
+                   f"treatment_amount: {treatment_amount}, loan_amount: {loan_amount}")
+        
+        return self._make_request("updateTreatmentAndLoanAmount", params=params)

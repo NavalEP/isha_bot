@@ -3358,8 +3358,6 @@ Upload bank statement by clicking on the link below.
                     if is_bureau_approved:
                         return f"""Great news! 🥳 Patient {patient_name} is **APPROVED** ✅ for a no-cost EMI payment plan.
 
-You are just 4 steps away from the disbursal.
-
 Continue with payment plan selection."""
                     else:
                         return f"""Great news! 🥳 Patient {patient_name} is **APPROVED** ✅ for a no-cost EMI payment plan.
@@ -3545,7 +3543,7 @@ E-sign agreement using this link.
                 return response_message
             else:
                 # If message is not "address details complete", provide guidance
-                return "Please confirm that address details are complete by typing 'address details complete'."
+                return "Please confirm that address details."
                 
         except Exception as e:
             logger.error(f"Error handling address details completion: {e}")

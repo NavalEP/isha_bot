@@ -9,7 +9,8 @@ from cpapp.api.loan.views import (
     DisburseDetailReportView, UploadDocumentsView, LoanTransactionsView, MatchingEmiPlansView,
     LoanCountAndAmountView, UserLoanStatusView, GetAllChildClinicsView, GetLoanDetailsByUserIdView,
     GetDoctorDashboardDataView, GetDoctorProfileDetailsView, SaveLoanDetailsView, GetUserAddressView,
-    GetAllFinDocDistrictsView, SaveAddressDetailsView, GetDisburseDataByLoanIdView
+    GetAllFinDocDistrictsView, SaveAddressDetailsView, GetDisburseDataByLoanIdView,
+    UpdateProductDetailView, UpdateTreatmentAndLoanAmountView
 )
 
 
@@ -56,4 +57,6 @@ urlpatterns = [
     path('userDetails/addressDetail/', SaveAddressDetailsView.as_view(), name='save_address_details'),
     path('finDoc/allFindocDistricts/', GetAllFinDocDistrictsView.as_view(), name='get_all_findoc_districts'),
     path('getDisburseDataByLoanId/', GetDisburseDataByLoanIdView.as_view(), name='get_disburse_data_by_loan_id'),
+    path('updateProductDetail/', UpdateProductDetailView.as_view(), name='update_product_detail'),
+    path('updateTreatmentAndLoanAmount/', UpdateTreatmentAndLoanAmountView.as_view(), name='update_treatment_and_loan_amount'),
 ]
