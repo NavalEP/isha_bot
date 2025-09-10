@@ -913,3 +913,54 @@ class UpdateTreatmentAndLoanAmountView(BaseLoanAPIView):
                 'attachment': None,
                 'message': f'Internal server error: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class GetLoanStatusWithUserStatusView(BaseLoanAPIView):
+    """Get loan status with user status"""
+    
+    def get(self, request):
+        loan_id = request.GET.get('loanId')
+        if not loan_id:
+            return Response({
+                'status': 400,
+                'message': 'loanId parameter is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            result = self.api_client.get_loan_status_with_user_status(loan_id)
+            
+            if result and result.get('status') == 200:
+                return Response({
+                    'status': 200,
+                    'data': result.get('data'),
+                    'attachment': result.get('attachment'),
+                    'message': result.get('message', 'Loan status with user status retrieved successfully')
+                })
+            
+            # Handle 404 case specifically
+            if result and result.get('status') == 404:
+                return Response({
+                    'status': 404,
+                    'data': None,
+                    'attachment': None,
+                    'message': result.get('message', 'Loan status not found')
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Handle other error cases
+            error_message = result.get('message', 'Failed to fetch loan status with user status') if result else 'No response from external API'
+            logger.error(f"Error fetching loan status with user status for loan {loan_id}: {error_message}")
+            
+            return Response({
+                'status': 500,
+                'data': None,
+                'attachment': None,
+                'message': error_message
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+        except Exception as e:
+            logger.error(f"Exception in get_loan_status_with_user_status for loan {loan_id}: {str(e)}")
+            return Response({
+                'status': 500,
+                'data': None,
+                'attachment': None,
+                'message': f'Internal server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

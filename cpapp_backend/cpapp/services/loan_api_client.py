@@ -523,3 +523,21 @@ class LoanAPIClient:
                    f"treatment_amount: {treatment_amount}, loan_amount: {loan_amount}")
         
         return self._make_request("updateTreatmentAndLoanAmount", params=params)
+    
+    def get_loan_status_with_user_status(self, loan_id: str) -> Optional[Dict]:
+        """
+        Get loan status with user status
+        
+        Args:
+            loan_id: Loan ID (required)
+            
+        Returns:
+            API response data or None if request failed
+        """
+        params = {
+            'loanId': loan_id
+        }
+        
+        logger.info(f"GetLoanStatusWithUserStatus: Fetching loan status with user status for loan_id: {loan_id}")
+        
+        return self._make_request("status/getLoanStatusWithUserStatus", params=params)
