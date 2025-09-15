@@ -688,5 +688,27 @@ class CarepayAPIClient:
                     params = {"userId": user_id}
                     return self._make_request("GET", endpoint, params=params)
 
+    def create_digilocker_url(self, loan_id: str) -> Dict[str, Any]:
+        """
+        Create DigiLocker URL for KYC verification.
+        Corresponds to API: /signzy/digilocker/createUrl
+
+        Args:
+            loan_id: The loan ID for which to create DigiLocker URL.
+
+        Returns:
+            API response containing DigiLocker URL with the following structure:
+            {
+                "status": 200,
+                "data": "https://api.digitallocker.gov.in/public/oauth2/1/authorize?...",
+                "attachment": null,
+                "message": "success"
+            }
+        """
+        endpoint = "signzy/digilocker/createUrl"
+        params = {"loanId": loan_id}
+        logger.info(f"Creating DigiLocker URL for loanId: {loan_id}")
+        return self._make_request('GET', endpoint, params=params)
+
     
 

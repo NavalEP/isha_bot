@@ -969,6 +969,34 @@ CRITICAL CONTEXT AWARENESS RULES:
                 self._update_session_history(session_id, message, ai_message)
                 return ai_message
 
+            # Handle post-approval address details flow when additional_details_completed
+            if current_status == "additional_details_completed":
+                logger.info(f"Session {session_id}: Handling post-approval address details flow")
+                ai_message = self._handle_post_approval_address_details(session_id, message)
+                self._update_session_history(session_id, message, ai_message)
+                return ai_message
+
+            # Handle post-approval address details completion
+            if current_status == "post_approval_address_details":
+                logger.info(f"Session {session_id}: Handling post-approval address details completion")
+                ai_message = self._handle_address_details_completion(session_id, message)
+                self._update_session_history(session_id, message, ai_message)
+                return ai_message
+
+            # Handle KYC completed status
+            if current_status == "kyc_completed":
+                logger.info(f"Session {session_id}: Handling KYC completed status")
+                ai_message = self._handle_kyc_completed_status(session_id, message)
+                self._update_session_history(session_id, message, ai_message)
+                return ai_message
+
+            # Handle loan disbursal ready status
+            if current_status == "loan_disbursal_ready":
+                logger.info(f"Session {session_id}: Handling loan disbursal ready status")
+                ai_message = self._handle_loan_disbursal_ready_status(session_id, message)
+                self._update_session_history(session_id, message, ai_message)
+                return ai_message
+
             logger.info(f"Session {session_id}: Using full agent executor (status: {current_status})")
             session_tools = self._create_session_aware_tools(session_id)
 
@@ -3327,13 +3355,19 @@ Patient's 6-digit business location pincode"""
                 else:
                     logger.warning(f"Session {session_id}: Doctor ID not found in session data. Skipping FIBE flow.")
 
-                # Determine which link to return - always fallback to profile_link if fibe_link_to_display is None
+                # Get user ID from session data
+                session = SessionManager.get_session_from_db(session_id)
+                user_id = session.get("data", {}).get("userId", "") if session else ""
+                
+               
                 link_to_display = fibe_link_to_display if fibe_link_to_display else profile_link
+
 
                 # Use the new centralized decision logic
                 decision_result = self._determine_loan_decision(session_id, profile_link, fibe_link_to_display)
                 decision_status = decision_result["status"]
                 link_to_display = decision_result["link"]
+                is_bureau_approved = decision_result.get("is_bureau_approved", False)
                 
                 # Get patient name from session data
                 patient_name = session.get("data", {}).get("fullName", "")
@@ -3349,7 +3383,12 @@ Upload bank statement by clicking on the link below.
 
 {link_to_display}"""
                 elif decision_status == "APPROVED":
-                    return f"""Great news! 🥳 Patient {patient_name} is **APPROVED** ✅ for a no-cost EMI payment plan.
+                    if is_bureau_approved:
+                        return f"""Great news! 🥳 Patient {patient_name} is **APPROVED** ✅ for a no-cost EMI payment plan.
+
+Continue with payment plan selection."""
+                    else:
+                        return f"""Great news! 🥳 Patient {patient_name} is **APPROVED** ✅ for a no-cost EMI payment plan.
 
 You are just 4 steps away from the disbursal.
 
@@ -3411,6 +3450,133 @@ Re-enquire with your family member's details."""
             logger.error(f"Error getting profile completion link: {e}")
             fallback_url = "https://carepay.money/patient/Gurgaon/Nikhil_Dental_Clinic/Nikhil_Salkar/e71779851b144d1d9a25a538a03612fc/"
             return Helper.clean_url(fallback_url)
+
+    def _handle_post_approval_address_details(self, session_id: str, message: str) -> str:
+        """
+        Handle post-approval address details flow and KYC status transition
+        
+        Args:
+            session_id: Session identifier
+            message: User message
+            
+        Returns:
+            Response message with payment plan details and KYC link
+        """
+        try:
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                logger.error(f"Session {session_id} not found")
+                return "Session not found. Please start a new conversation."
+            
+            
+            response_message = f"""
+Kindly confirm patient's address details by clicking below buttom.
+
+"""
+            
+            # Update status to KYC pending
+            SessionManager.update_session_data_field(session_id, "status", "post_approval_address_details")
+            SessionManager.update_session_data_field(session_id, "data.post_approval_address_details", datetime.now().isoformat())
+            
+            logger.info(f"Session {session_id}: Updated status to post_approval_address_details_completed and provided post-approval address details link")
+            
+            return response_message
+            
+        except Exception as e:
+            logger.error(f"Error handling post-approval address details: {e}")
+            return "There was an error processing your request. Please try again."
+
+    def _handle_address_details_completion(self, session_id: str, message: str) -> str:
+        """
+        Handle address details completion and provide next steps with URLs
+        
+        Args:
+            session_id: Session identifier
+            message: User message
+            
+        Returns:
+            Response message with face verification, EMI auto-pay, and agreement e-signing links
+        """
+        try:
+            session = SessionManager.get_session_from_db(session_id)
+            if not session:
+                logger.error(f"Session {session_id} not found")
+                return "Session not found. Please start a new conversation."
+            
+            # Check if user message indicates address details are complete
+            if message.lower().strip() == "address details complete":
+                # Get session data to construct URLs with session ID
+                session_data = session.get("data", {})
+                user_id = session_data.get("userId", "")
+                
+                # Get loan ID from save_loan_details in session data
+                loan_id = ""
+                if "api_responses" in session_data and "save_loan_details" in session_data["api_responses"]:
+                    save_loan_response = session_data["api_responses"]["save_loan_details"]
+                    logger.info(f"save_loan_details response: {save_loan_response}")
+                    if isinstance(save_loan_response, dict) and save_loan_response.get("status") == 200:
+                        if "data" in save_loan_response and isinstance(save_loan_response["data"], dict):
+                            loan_id = save_loan_response["data"].get("loanId")
+                            logger.info(f"Found loan_id in save_loan_details response: {loan_id}")
+                
+                logger.info(f"Session {session_id}: Retrieved loanId: {loan_id}, userId: {user_id}")
+
+                digilocker_response = self.api_client.create_digilocker_url(loan_id)
+                
+                # Extract DigiLocker URL from response
+                adhaar_verification_url = ""
+                if digilocker_response and digilocker_response.get("status") == 200:
+                    adhaar_verification_url = digilocker_response.get("data", "")
+                    logger.info(f"Session {session_id}: Retrieved DigiLocker URL: {adhaar_verification_url}")
+                else:
+                    logger.error(f"Session {session_id}: Failed to get DigiLocker URL. Response: {digilocker_response}")
+                
+                # Construct the URLs with proper loan ID and user ID - ensure loanId is not empty
+                face_verification_url = f"https://carepay.money/patient/faceverification/{user_id}" if user_id else "https://carepay.money/patient/faceverification/"
+                emi_autopay_url = f"https://carepay.money/patient/emiautopayintro/{loan_id}" if loan_id else "https://carepay.money/patient/emiautopayintro/"
+                agreement_esigning_url = f"https://carepay.money/patient/agreementesigning/{loan_id}" if loan_id else "https://carepay.money/patient/agreementesigning/"
+                
+                logger.info(f"Session {session_id}: Constructed URLs - Face: {face_verification_url}, EMI: {emi_autopay_url}, Agreement: {agreement_esigning_url}")
+                
+                # Create response with three different messages and URLs
+                response_message = f"""Payment is now just 4 steps away.
+
+• Adhaar verification.
+• Face verification.
+• EMI auto payment approval.
+• Agreement e-signing.
+
+Now, let's complete Adhaar verification.
+
+[Adhaar Verification]{adhaar_verification_url}
+
+Now, let's complete face verification.
+
+[Face Verification]{face_verification_url}
+
+Approve the EMI auto-pay setup.
+
+[EMI Auto-pay Setup]{emi_autopay_url}
+
+E-sign agreement using this link.
+
+[Agreement E-signing]{agreement_esigning_url}"""
+                
+                # Update status to kyc_step
+                SessionManager.update_session_data_field(session_id, "status", "kyc_step")
+                SessionManager.update_session_data_field(session_id, "data.address_details_completed", datetime.now().isoformat())
+                
+                logger.info(f"Session {session_id}: Address details completed, status updated to kyc_step")
+                
+                return response_message
+            else:
+                # If message is not "address details complete", provide guidance
+                return "Please confirm that address details."
+                
+        except Exception as e:
+            logger.error(f"Error handling address details completion: {e}")
+            return "There was an error processing your request. Please try again."
+
 
     def _process_employment_data_from_additional_details(self, session_id: str) -> Dict[str, Any]:
         """
@@ -3815,6 +3981,7 @@ Re-enquire with your family member's details."""
             # Apply decision flow logic
             decision_status = None
             link_to_use = profile_link
+            is_bureau_approved = False  # Track if approval came from bureau decision
             
             # 0. If both FIBE lead status and Bureau are REJECTED -> REJECTED
             if (fibe_lead_status and fibe_lead_status.upper() == "REJECTED" and 
@@ -3827,6 +3994,7 @@ Re-enquire with your family member's details."""
             elif fibe_status == "GREEN":
                 decision_status = "APPROVED"
                 link_to_use = fibe_link if fibe_link else profile_link
+                is_bureau_approved = False  # This is FIBE approval, not bureau
                 logger.info(f"Session {session_id}: Fibe GREEN -> APPROVED with Fibe link")
             
             # 2. If Fibe AMBER
@@ -3835,6 +4003,7 @@ Re-enquire with your family member's details."""
                 if bureau_status and (bureau_status.upper() == "APPROVED" or "approved" in bureau_status.lower()):
                     decision_status = "APPROVED"
                     link_to_use = profile_link
+                    is_bureau_approved = True  # This approval came from bureau decision
                     logger.info(f"Session {session_id}: Fibe AMBER + Bureau APPROVED -> APPROVED with profile link")
                 # If bureau INCOME_VERIFICATION_REQUIRED -> INCOME_VERIFICATION_REQUIRED with Fibe link
                 elif bureau_status and (bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED" or "income verification required" in bureau_status.lower()):
@@ -3864,6 +4033,7 @@ Re-enquire with your family member's details."""
             elif fibe_status == "RED":
                 if bureau_status and (bureau_status.upper() == "APPROVED" or "approved" in bureau_status.lower()):
                     decision_status = "APPROVED"
+                    is_bureau_approved = True  # This approval came from bureau decision
                 elif bureau_status and (bureau_status.upper() == "REJECTED" or "rejected" in bureau_status.lower()):
                     decision_status = "REJECTED"
                 elif bureau_status and (bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED" or "income verification required" in bureau_status.lower()):
@@ -3877,6 +4047,7 @@ Re-enquire with your family member's details."""
             elif fibe_status is None:
                 if bureau_status and (bureau_status.upper() == "APPROVED" or "approved" in bureau_status.lower()):
                     decision_status = "APPROVED"
+                    is_bureau_approved = True  # This approval came from bureau decision
                 elif bureau_status and (bureau_status.upper() == "REJECTED" or "rejected" in bureau_status.lower()):
                     decision_status = "REJECTED"
                 elif bureau_status and (bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED" or "income verification required" in bureau_status.lower()):
@@ -3893,17 +4064,18 @@ Re-enquire with your family member's details."""
                 logger.info(f"Session {session_id}: No decisions available -> PENDING with profile link")
                 logger.info(f"Session {session_id}: Fell through to final PENDING condition - fibe_status: '{fibe_status}', bureau_status: '{bureau_status}'")
             
-            logger.info(f"Session {session_id}: Final decision - Status: {decision_status}, Link: {link_to_use}")
+            logger.info(f"Session {session_id}: Final decision - Status: {decision_status}, Link: {link_to_use}, Bureau Approved: {is_bureau_approved}")
             logger.info(f"Session {session_id}: Decision logic summary - Fibe: {fibe_status}, FIBE Lead Status: {fibe_lead_status}, Bureau: {bureau_status}, Final: {decision_status}")
             
             return {
                 "status": decision_status,
-                "link": link_to_use
+                "link": link_to_use,
+                "is_bureau_approved": is_bureau_approved
             }
             
         except Exception as e:
             logger.error(f"Error determining loan decision for session {session_id}: {e}")
-            return {"status": "PENDING", "link": profile_link}
+            return {"status": "PENDING", "link": profile_link, "is_bureau_approved": False}
 
     def check_jp_cardless(self, session_id: str) -> Dict[str, Any]:
         """

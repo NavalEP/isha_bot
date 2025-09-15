@@ -8,7 +8,9 @@ from cpapp.api.loan.views import (
     GetQrCodeView, ActivitiesLogView, AssignedProductView, BureauDecisionView,
     DisburseDetailReportView, UploadDocumentsView, LoanTransactionsView, MatchingEmiPlansView,
     LoanCountAndAmountView, UserLoanStatusView, GetAllChildClinicsView, GetLoanDetailsByUserIdView,
-    GetDoctorDashboardDataView, GetDoctorProfileDetailsView
+    GetDoctorDashboardDataView, GetDoctorProfileDetailsView, SaveLoanDetailsView, GetUserAddressView,
+    GetAllFinDocDistrictsView, SaveAddressDetailsView, GetDisburseDataByLoanIdView,
+    UpdateProductDetailView, UpdateTreatmentAndLoanAmountView, GetLoanStatusWithUserStatusView
 )
 
 
@@ -50,4 +52,12 @@ urlpatterns = [
     path('userDetails/getLoanDetailsByUserId/', GetLoanDetailsByUserIdView.as_view(), name='get_loan_details_by_user_id'),
     path('getDoctorDashboardData/', GetDoctorDashboardDataView.as_view(), name='get_doctor_dashboard_data'),
     path('getDoctorProfDetailsByDoctorId/', GetDoctorProfileDetailsView.as_view(), name='get_doctor_profile_details'),
+    path('userDetails/saveLoanDetails/', SaveLoanDetailsView.as_view(), name='save_loan_details'),
+    path('userDetails/getUserAddress/', GetUserAddressView.as_view(), name='get_user_address'),
+    path('userDetails/addressDetail/', SaveAddressDetailsView.as_view(), name='save_address_details'),
+    path('finDoc/allFindocDistricts/', GetAllFinDocDistrictsView.as_view(), name='get_all_findoc_districts'),
+    path('getDisburseDataByLoanId/', GetDisburseDataByLoanIdView.as_view(), name='get_disburse_data_by_loan_id'),
+    path('updateProductDetail/', UpdateProductDetailView.as_view(), name='update_product_detail'),
+    path('updateTreatmentAndLoanAmount/', UpdateTreatmentAndLoanAmountView.as_view(), name='update_treatment_and_loan_amount'),
+    path('status/getLoanStatusWithUserStatus/', GetLoanStatusWithUserStatusView.as_view(), name='get_loan_status_with_user_status'),
 ]
