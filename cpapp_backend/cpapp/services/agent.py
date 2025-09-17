@@ -3504,9 +3504,9 @@ Kindly confirm patient's address details by clicking below buttom.
                     logger.error(f"Session {session_id}: Failed to get DigiLocker URL. Response: {digilocker_response}")
                 
                 # Construct the URLs with proper loan ID and user ID - ensure loanId is not empty
-                face_verification_url = f"https://carepay.money/patient/faceverification/{user_id}" if user_id else "https://carepay.money/patient/faceverification/"
-                emi_autopay_url = f"https://carepay.money/patient/emiautopayintro/{loan_id}" if loan_id else "https://carepay.money/patient/emiautopayintro/"
-                agreement_esigning_url = f"https://carepay.money/patient/agreementesigning/{loan_id}" if loan_id else "https://carepay.money/patient/agreementesigning/"
+                face_verification_url = f"https://uat.carepay.money/patient/faceverification/{user_id}" if user_id else "https://carepay.money/patient/faceverification/"
+                emi_autopay_url = f"https://uat.carepay.money/patient/emiautopayintro/{loan_id}" if loan_id else "https://carepay.money/patient/emiautopayintro/"
+                agreement_esigning_url = f"https://uat.carepay.money/patient/agreementesigning/{loan_id}" if loan_id else "https://carepay.money/patient/agreementesigning/"
                 
                 logger.info(f"Session {session_id}: Constructed URLs - Face: {face_verification_url}, EMI: {emi_autopay_url}, Agreement: {agreement_esigning_url}")
                 
