@@ -17,6 +17,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_core.tools import ArgsSchema
 from cpapp.services.api_client import CarepayAPIClient
+from cpapp.services.loan_api_client import LoanAPIClient
 from cpapp.models.session_data import SessionData
 from cpapp.services.session_manager import SessionManager
 from cpapp.services.helper import Helper
@@ -3368,6 +3369,7 @@ Patient's 6-digit business location pincode"""
                 decision_status = decision_result["status"]
                 link_to_display = decision_result["link"]
                 is_bureau_approved = decision_result.get("is_bureau_approved", False)
+                is_bureau_income_verification = decision_result.get("is_bureau_income_verification", False)
                 
                 # Get patient name from session data
                 patient_name = session.get("data", {}).get("fullName", "")
@@ -3377,7 +3379,19 @@ Patient's 6-digit business location pincode"""
                     patient_name = ocr_result.get("name", "")
                 
                 if decision_status == "INCOME_VERIFICATION_REQUIRED":
-                    return f"""Patient {patient_name} has a fair chance of approval, we need their last 3 months' bank statement to assess their application.
+                    if is_bureau_income_verification:
+                        # When bureau decision is INCOME_VERIFICATION_REQUIRED, use the specific bank statement link
+                        bank_statement_link = f"https://carepay.money/patient/digibankstatement/{user_id}"
+                        logger.info(f"Session {session_id}: Using bureau income verification flow with bank statement link: {bank_statement_link}")
+                        return f"""Patient {patient_name} has a fair chance of approval, we need their last 3 months' bank statement to assess their application.
+
+Upload bank statement by clicking on the link below.
+
+{bank_statement_link}"""
+                    else:
+                        # For other cases (like FIBE AMBER), use the original link
+                        logger.info(f"Session {session_id}: Using non-bureau income verification flow with link: {link_to_display}")
+                        return f"""Patient {patient_name} has a fair chance of approval, we need their last 3 months' bank statement to assess their application.
 
 Upload bank statement by clicking on the link below.
 
@@ -3468,19 +3482,48 @@ Re-enquire with your family member's details."""
                 logger.error(f"Session {session_id} not found")
                 return "Session not found. Please start a new conversation."
             
+            # Get user_id from session data
+            user_id = session.get("data", {}).get("userId")
+            if not user_id:
+                logger.error(f"Session {session_id}: User ID not found in session data")
+                return "User ID not found. Please start a new conversation."
             
-            response_message = f"""
-Kindly confirm patient's address details by clicking below buttom.
+            # Call get_assigned_product API first
+            logger.info(f"Session {session_id}: Calling get_assigned_product API for user_id: {user_id}")
+            assigned_product_response = LoanAPIClient().get_assigned_product(user_id)
+            
+            # Check if API call was successful (status 200)
+            if assigned_product_response and assigned_product_response.get("status") == 200:
+                logger.info(f"Session {session_id}: Assigned product API returned status 200, proceeding with address details")
+                
+                response_message = f"""
+Kindly confirm patient's address details by clicking below button.
 
 """
-            
-            # Update status to KYC pending
-            SessionManager.update_session_data_field(session_id, "status", "post_approval_address_details")
-            SessionManager.update_session_data_field(session_id, "data.post_approval_address_details", datetime.now().isoformat())
-            
-            logger.info(f"Session {session_id}: Updated status to post_approval_address_details_completed and provided post-approval address details link")
-            
-            return response_message
+                
+                # Update status to KYC pending
+                SessionManager.update_session_data_field(session_id, "status", "post_approval_address_details")
+                SessionManager.update_session_data_field(session_id, "data.post_approval_address_details", datetime.now().isoformat())
+                
+                logger.info(f"Session {session_id}: Updated status to post_approval_address_details and provided address details link")
+                
+                return response_message
+            else:
+                # API call failed or returned non-200 status, return previous AI message from database
+                logger.warning(f"Session {session_id}: Assigned product API failed or returned non-200 status: {assigned_product_response}")
+                
+                # Get previous AI message from session history
+                session_history = session.get("history", [])
+                if session_history:
+                    # Find the last AI message
+                    for message_entry in reversed(session_history):
+                        if message_entry.get("type") == "AIMessage":
+                            previous_ai_message = message_entry.get("content", "")
+                            logger.info(f"Session {session_id}: Returning previous AI message from database")
+                            return previous_ai_message
+                
+                # Fallback if no previous AI message found
+                return "First Selected Product then comeback here in Careena"
             
         except Exception as e:
             logger.error(f"Error handling post-approval address details: {e}")
@@ -3982,6 +4025,7 @@ E-sign agreement using this link.
             decision_status = None
             link_to_use = profile_link
             is_bureau_approved = False  # Track if approval came from bureau decision
+            is_bureau_income_verification = False  # Track if income verification came from bureau decision
             
             # 0. If both FIBE lead status and Bureau are REJECTED -> REJECTED
             if (fibe_lead_status and fibe_lead_status.upper() == "REJECTED" and 
@@ -4038,6 +4082,7 @@ E-sign agreement using this link.
                     decision_status = "REJECTED"
                 elif bureau_status and (bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED" or "income verification required" in bureau_status.lower()):
                     decision_status = "INCOME_VERIFICATION_REQUIRED"
+                    is_bureau_income_verification = True  # This income verification came from bureau decision
                 else:
                     decision_status = "PENDING"
                 link_to_use = profile_link
@@ -4052,6 +4097,7 @@ E-sign agreement using this link.
                     decision_status = "REJECTED"
                 elif bureau_status and (bureau_status.upper() == "INCOME_VERIFICATION_REQUIRED" or "income verification required" in bureau_status.lower()):
                     decision_status = "INCOME_VERIFICATION_REQUIRED"
+                    is_bureau_income_verification = True  # This income verification came from bureau decision
                 else:
                     decision_status = "PENDING"
                 link_to_use = profile_link
@@ -4064,18 +4110,19 @@ E-sign agreement using this link.
                 logger.info(f"Session {session_id}: No decisions available -> PENDING with profile link")
                 logger.info(f"Session {session_id}: Fell through to final PENDING condition - fibe_status: '{fibe_status}', bureau_status: '{bureau_status}'")
             
-            logger.info(f"Session {session_id}: Final decision - Status: {decision_status}, Link: {link_to_use}, Bureau Approved: {is_bureau_approved}")
+            logger.info(f"Session {session_id}: Final decision - Status: {decision_status}, Link: {link_to_use}, Bureau Approved: {is_bureau_approved}, Bureau Income Verification: {is_bureau_income_verification}")
             logger.info(f"Session {session_id}: Decision logic summary - Fibe: {fibe_status}, FIBE Lead Status: {fibe_lead_status}, Bureau: {bureau_status}, Final: {decision_status}")
             
             return {
                 "status": decision_status,
                 "link": link_to_use,
-                "is_bureau_approved": is_bureau_approved
+                "is_bureau_approved": is_bureau_approved,
+                "is_bureau_income_verification": is_bureau_income_verification
             }
             
         except Exception as e:
             logger.error(f"Error determining loan decision for session {session_id}: {e}")
-            return {"status": "PENDING", "link": profile_link, "is_bureau_approved": False}
+            return {"status": "PENDING", "link": profile_link, "is_bureau_approved": False, "is_bureau_income_verification": False}
 
     def check_jp_cardless(self, session_id: str) -> Dict[str, Any]:
         """
