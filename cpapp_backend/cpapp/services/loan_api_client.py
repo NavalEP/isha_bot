@@ -10,7 +10,7 @@ class LoanAPIClient:
     """Client for making requests to the external loan API"""
     
     def __init__(self):
-        self.base_url = "https://uatbackend.carepay.money"
+        self.base_url = "https://backend.carepay.money"
         self.timeout = 30
         self.session = requests.Session()
         

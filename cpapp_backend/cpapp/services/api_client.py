@@ -12,7 +12,7 @@ class CarepayAPIClient:
     """
     
     def __init__(self):
-        self.base_url = 'https://uatbackend.carepay.money'
+        self.base_url = 'https://backend.carepay.money'
        
     
         
@@ -688,6 +688,39 @@ class CarepayAPIClient:
                     params = {"userId": user_id}
                     return self._make_request("GET", endpoint, params=params)
 
+    def profile_ingestion_for_fibe_loanId(self, loan_id: str) -> Dict[str, Any]:
+        """
+        Profile ingestion for Fibe integration.
+        Corresponds to API: /v1/profileIngestionForFibe
+
+        Args:
+            loan_id: The loan ID for which to perform profile ingestion.
+
+        Returns:
+            API response as a dictionary.
+        """
+        endpoint = "v1/profileIngestionForFibe"
+        params = {"loanId": loan_id}
+        logger.info(f"Performing profile ingestion for Fibe with loanId: {loan_id}")
+        return self._make_request('GET', endpoint, params=params)
+
+
+    def get_bre_decision(self, loan_id: str) -> Dict[str, Any]:
+        """
+        Get Bureau Risk Engine (BRE) decision for a loan application.
+        Corresponds to API: /getBreDecision
+
+        Args:
+            loan_id: The loan ID for which to get BRE decision.
+
+        Returns:
+            API response as a dictionary.
+        """
+        endpoint = "getBreDecision"
+        params = {"loanId": loan_id}
+        logger.info(f"Getting BRE decision for loanId: {loan_id}")
+        return self._make_request('GET', endpoint, params=params)
+
     def create_digilocker_url(self, loan_id: str) -> Dict[str, Any]:
         """
         Create DigiLocker URL for KYC verification.
@@ -710,5 +743,35 @@ class CarepayAPIClient:
         logger.info(f"Creating DigiLocker URL for loanId: {loan_id}")
         return self._make_request('GET', endpoint, params=params)
 
-    
 
+    def get_bank_statement_webview_url(self, loan_id: str) -> Dict[str, Any]:
+        """
+        Get bank statement web view URL for a loan application.
+        Corresponds to API: https://backend.carepay.money/v1/getBankStatementWebViewUrl?loanId=
+
+        Args:
+            loan_id: The loan ID for which to get bank statement web view URL.
+
+        Returns:
+            API response containing the web view URL as a dictionary.
+        """
+        endpoint = "v1/getBankStatementWebViewUrl"
+        params = {"loanId": loan_id}
+        logger.info(f"Getting bank statement web view URL for loanId: {loan_id}")
+        return self._make_request('GET', endpoint, params=params)
+
+    def get_redirection_sso_url(self, loan_id: str) -> Dict[str, Any]:
+        """
+        Get redirection SSO URL for a loan application.
+        Corresponds to API: https://backend.carepay.money/v1/getRedirectionSsoUrl?loanId=
+
+        Args:
+            loan_id: The loan ID for which to get redirection SSO URL.
+
+        Returns:
+            API response containing the redirection SSO URL as a dictionary.
+        """
+        endpoint = "v1/getRedirectionSsoUrl"
+        params = {"loanId": loan_id}
+        logger.info(f"Getting redirection SSO URL for loanId: {loan_id}")
+        return self._make_request('GET', endpoint, params=params)
