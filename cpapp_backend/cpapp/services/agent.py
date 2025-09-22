@@ -3511,7 +3511,16 @@ Re-enquire with your family member's details."""
                                     SessionManager.update_session_data_field(session_id, "status", "post_approval_address_details")
                                     SessionManager.update_session_data_field(session_id, "data.post_approval_address_details", datetime.now().isoformat())
                                     
-                                    response_message = f"""Continue your remaining journey by below URL
+                                    response_message = f"""
+Treatment is now just 3 steps away\n\n
+
+•⁠ Complete KYC.\n\n
+
+•⁠ Set up auto-debit.\n\n
+
+•⁠ Give consent to disburse.\n\n
+
+Click on the button below to continue journey.
 
 {redirection_url}"""
                                     
