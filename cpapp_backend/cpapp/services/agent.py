@@ -3262,155 +3262,119 @@ Patient's 6-digit business location pincode"""
                 SessionManager.update_session_data_field(session_id, "status", "additional_details_completed")
                 SessionManager.update_session_data_field(session_id, "data.details_collection_timestamp", datetime.now().isoformat())
                 
-                # Get profile link to show to the user
-                profile_link = self._get_profile_link(session_id)
-
-                # Check if doctor is mapped by FIBE
+                # Get necessary IDs from session
                 doctor_id = session["data"].get("doctorId") or session["data"].get("doctor_id")
-                logger.info(f"Session {session_id}: Doctor ID: {doctor_id}")
-                fibe_link_to_display = None  # Initialize a variable to hold the Fibe link if applicable
+                user_id = session["data"].get("userId")
+                logger.info(f"Session {session_id}: Doctor ID: {doctor_id}, User ID: {user_id}")
                 
-                if doctor_id:
-                    try:
-                        # Check if the method exists before calling it
-                        if hasattr(self.api_client, 'check_doctor_mapped_by_nbfc'):
+                if user_id:
+                    # Get loan details by user ID
+                    loan_details_response = self.api_client.get_loan_details_by_user_id(user_id)
+                    logger.info(f"Session {session_id}: Loan details response for user_id {user_id}: {json.dumps(loan_details_response) if loan_details_response else 'None'}")
+                    
+                    loan_id = None
+                    if loan_details_response and loan_details_response.get("status") == 200:
+                        loan_data = loan_details_response.get("data", {})
+                        loan_id = loan_data.get("loanId")
+                        logger.info(f"Session {session_id}: Extracted loan ID: {loan_id}")
+                    
+                    if loan_id:
+                        # Check if doctor is mapped by FIBE
+                        
+                        if doctor_id and hasattr(self.api_client, 'check_doctor_mapped_by_nbfc'):
                             check_doctor_mapped_by_nbfc_response = self.api_client.check_doctor_mapped_by_nbfc(doctor_id)
                             logger.info(f"Session {session_id}: Check doctor mapped by FIBE response for doctor_id {doctor_id}: {json.dumps(check_doctor_mapped_by_nbfc_response)}")
 
-                            # Handle both status 200 and non-500 statuses that indicate success
                             if check_doctor_mapped_by_nbfc_response.get("status") == 200:
                                 doctor_mapped_by_nbfc = check_doctor_mapped_by_nbfc_response.get("data")
                                 if doctor_mapped_by_nbfc == "true":
-                                    logger.info(f"Session {session_id}: Doctor {doctor_id} is mapped by FIBE. Proceeding to FIBE flow.")
+                                   
+                                    logger.info(f"Session {session_id}: Doctor {doctor_id} is mapped by FIBE.")
                                     
-                                    # Doctor is mapped, get user_id and proceed with FIBE flow
-                                    user_id = session["data"].get("userId")
-                                    if user_id:
-                                        try:
-                                            # Call profile_ingestion_for_fibe API first
-                                            profile_ingestion_response = self.api_client.profile_ingestion_for_fibe(user_id)
-                                            logger.info(f"Session {session_id}: Fibe profile ingestion response for user_id {user_id}: {json.dumps(profile_ingestion_response) if profile_ingestion_response else 'None'}")
-                                            
-                                            # Store the API response in session data
-                                            SessionManager.update_session_data_field(session_id, "data.api_responses.profile_ingestion_for_fibe", profile_ingestion_response)
+                                    # Call profile ingestion for Fibe with loan ID
+                                    profile_ingestion_response = self.api_client.profile_ingestion_for_fibe_loanId(loan_id)
+                                    logger.info(f"Session {session_id}: Profile ingestion response for loan_id {loan_id}: {json.dumps(profile_ingestion_response) if profile_ingestion_response else 'None'}")
+                        
+                        # Always call BRE decision API regardless of doctor mapping
+                        bre_decision_response = self.api_client.get_bre_decision(loan_id)
+                        logger.info(f"Session {session_id}: BRE decision response for loan_id {loan_id}: {json.dumps(bre_decision_response) if bre_decision_response else 'None'}")
+                        
+                        # Process BRE decision response
+                        if bre_decision_response and bre_decision_response.get("status") == 200:
+                            bre_data = bre_decision_response.get("data", {})
+                            selected_lender = bre_data.get("selectedLender")
+                            lender_decision = bre_data.get("lenderDecision")
+                            
+                            logger.info(f"Session {session_id}: Selected lender: {selected_lender}, Lender decision: {lender_decision}")
+                            
+                            patient_name = session.get("data", {}).get("fullName", "")
+                            
+                            # Handle different lender and decision combinations
+                            if selected_lender == "FIBE" and lender_decision == "APPROVED":
+                                return f"""Great news! 🥳 Patient {patient_name} is **APPROVED** ✅ for a no-cost EMI payment plan.
 
-                                            # Store potential fibe link from profile ingestion
-                                            potential_fibe_link = None
-                                            if profile_ingestion_response and isinstance(profile_ingestion_response, dict):
-                                                response_status = profile_ingestion_response.get("status")
-                                                if response_status == 200:
-                                                    ingestion_data = profile_ingestion_response.get("data")
-                                                    if ingestion_data and isinstance(ingestion_data, dict):
-                                                        potential_fibe_link = ingestion_data.get("bitlyUrl")
-                                                        if potential_fibe_link:
-                                                            logger.info(f"Session {session_id}: Retrieved Fibe Bitly URL for user_id {user_id}: {potential_fibe_link}")
-                                                        else:
-                                                            logger.warning(f"Session {session_id}: No bitlyUrl found in Fibe profile ingestion response for user_id {user_id}: {ingestion_data}")
-                                                    else:
-                                                        lead_status = ingestion_data.get('leadStatus') if isinstance(ingestion_data, dict) else "N/A"
-                                                        logger.info(f"Session {session_id}: Fibe profile ingestion for user_id {user_id} did not result in APPROVED leadStatus. Status: {lead_status}")
-                                                else:
-                                                    logger.error(f"Session {session_id}: Fibe profile ingestion API call failed for user_id {user_id}. Status: {response_status}")
-                                            else:
-                                                logger.error(f"Session {session_id}: Fibe profile ingestion API call returned invalid response for user_id {user_id}. Response: {profile_ingestion_response}")
+You are just 4 steps away from the disbursal.
 
-                                            # Now call check_fibe_flow API
-                                            check_fibe_response = self.api_client.check_fibe_flow(user_id)
-                                            logger.info(f"Session {session_id}: Fibe flow check response for user_id {user_id}: {json.dumps(check_fibe_response)}")
+Continue with payment plan selection."""
+                            
+                            elif selected_lender == "FINDOC" and lender_decision == "APPROVED":
+                                return f"""Great news! 🥳 Patient {patient_name} is **APPROVED** ✅ for a no-cost EMI payment plan.
 
-                                            # Store the API response in session data
-                                            SessionManager.update_session_data_field(session_id, "data.api_responses.check_fibe_flow", check_fibe_response)
+You are just 5 steps away from the disbursal.
 
-                                            # Process based on check_fibe_flow response
-                                            if check_fibe_response.get("status") == 200:
-                                                fibe_status_data = check_fibe_response.get("data")
-                                                if fibe_status_data == "GREEN":
-                                                    logger.info(f"Session {session_id}: Fibe flow is GREEN for user_id {user_id}. Using Fibe link.")
-                                                    # Use the fibe link for GREEN status
-                                                    fibe_link_to_display = potential_fibe_link
-                                                elif fibe_status_data == "AMBER":
-                                                    logger.info(f"Session {session_id}: Fibe flow is AMBER for user_id {user_id}. Using Fibe link.")
-                                                    # Use the fibe link for AMBER status as well
-                                                    fibe_link_to_display = potential_fibe_link
-                                                elif fibe_status_data == "RED":
-                                                    logger.info(f"Session {session_id}: Fibe flow is RED (REJECTED) for user_id {user_id}. Using profile link.")
-                                                else:
-                                                    logger.warning(f"Session {session_id}: Fibe flow check for user_id {user_id} returned an unexpected data value: {fibe_status_data}. Using profile link.")
-                                            else:
-                                                logger.warning(f"Session {session_id}: Fibe flow check API call failed or returned non-200 status for user_id {user_id}. Using profile link.")
-                                        
-                                        except Exception as e:
-                                            logger.error(f"Session {session_id}: Exception during Fibe flow processing for user_id {user_id}: {e}", exc_info=True)
-                                    else:
-                                        logger.warning(f"Session {session_id}: 'userId' not found in session data. Skipping Fibe flow.")
-                                else:
-                                    logger.info(f"Session {session_id}: Doctor {doctor_id} is not mapped by FIBE (status: {doctor_mapped_by_nbfc}). Skipping Fibe flow.")
-                            elif check_doctor_mapped_by_nbfc_response.get("status") == 500:
-                                logger.warning(f"Session {session_id}: Check doctor mapped by FIBE API returned status 500 for doctor_id {doctor_id}. Falling back to profile link.")
-                            else:
-                                logger.warning(f"Session {session_id}: Check doctor mapped by FIBE API call failed for doctor_id {doctor_id}. Status: {check_doctor_mapped_by_nbfc_response.get('status')}")
-                        else:
-                            logger.warning(f"Session {session_id}: check_doctor_mapped_by_nbfc method not available in API client. Falling back to profile link.")
-                    except Exception as e:
-                        logger.error(f"Session {session_id}: Exception during doctor mapping check for doctor_id {doctor_id}: {e}", exc_info=True)
-                else:
-                    logger.warning(f"Session {session_id}: Doctor ID not found in session data. Skipping FIBE flow.")
-
-                # Get user ID from session data
-                session = SessionManager.get_session_from_db(session_id)
-                user_id = session.get("data", {}).get("userId", "") if session else ""
-                
-               
-                link_to_display = fibe_link_to_display if fibe_link_to_display else profile_link
-
-
-                # Use the new centralized decision logic
-                decision_result = self._determine_loan_decision(session_id, profile_link, fibe_link_to_display)
-                decision_status = decision_result["status"]
-                link_to_display = decision_result["link"]
-                is_bureau_approved = decision_result.get("is_bureau_approved", False)
-                is_bureau_income_verification = decision_result.get("is_bureau_income_verification", False)
-                
-                # Get patient name from session data
-                patient_name = session.get("data", {}).get("fullName", "")
-                if not patient_name:
-                    # Try to get from ocr_result if fullName is not available
-                    ocr_result = session.get("data", {}).get("ocr_result", {})
-                    patient_name = ocr_result.get("name", "")
-                
-                if decision_status == "INCOME_VERIFICATION_REQUIRED":
-                    if is_bureau_income_verification:
-                        # When bureau decision is INCOME_VERIFICATION_REQUIRED, use the specific bank statement link
-                        bank_statement_link = f"https://carepay.money/patient/digibankstatement/{user_id}"
-                        logger.info(f"Session {session_id}: Using bureau income verification flow with bank statement link: {bank_statement_link}")
-                        return f"""Patient {patient_name} has a fair chance of approval, we need their last 3 months' bank statement to assess their application.
+Continue with payment plan selection."""
+                            
+                            elif selected_lender == "FINDOC" and lender_decision == "INCOME VERIFICATION REQUIRED":
+                                bank_statement_link = f"https://carepay.money/patient/digibankstatement/{user_id}"
+                                logger.info(f"Session {session_id}: Using FINDOC income verification flow with bank statement link: {bank_statement_link}")
+                                return f"""Patient {patient_name} has a fair chance of approval, we need their last 3 months' bank statement to assess their application.
 
 Upload bank statement by clicking on the link below.
 
 {bank_statement_link}"""
-                    else:
-                        # For other cases (like FIBE AMBER), use the original link
-                        logger.info(f"Session {session_id}: Using non-bureau income verification flow with link: {link_to_display}")
-                        return f"""Patient {patient_name} has a fair chance of approval, we need their last 3 months' bank statement to assess their application.
+                            
+                            elif selected_lender == "FIBE" and lender_decision == "INCOME VERIFICATION REQUIRED":
+                                # Get bank statement webview URL for FIBE
+                                bank_statement_webview_response = self.api_client.get_bank_statement_webview_url(loan_id)
+                                logger.info(f"Session {session_id}: Bank statement webview response for loan_id {loan_id}: {json.dumps(bank_statement_webview_response) if bank_statement_webview_response else 'None'}")
+                                
+                                redirection_url = None
+                                if bank_statement_webview_response and bank_statement_webview_response.get("status") == 200:
+                                    webview_data = bank_statement_webview_response.get("data", {})
+                                    redirection_url = webview_data.get("redirectionUrl")
+                                
+                                if redirection_url:
+                                    logger.info(f"Session {session_id}: Using FIBE income verification flow with redirection URL: {redirection_url}")
+                                    return f"""Patient {patient_name} has a fair chance of approval, we need their last 3 months' bank statement to assess their application.
 
 Upload bank statement by clicking on the link below.
 
-{link_to_display}"""
-                elif decision_status == "APPROVED":
-                    if is_bureau_approved:
-                        return f"""Great news! 🥳 Patient {patient_name} is **APPROVED** ✅ for a no-cost EMI payment plan.
+{redirection_url}"""
+                                else:
+                                    # Fallback to default bank statement link if redirection URL not available
+                                    bank_statement_link = f"https://carepay.money/patient/digibankstatement/{user_id}"
+                                    logger.info(f"Session {session_id}: Fallback to default bank statement link: {bank_statement_link}")
+                                    return f"""Patient {patient_name} has a fair chance of approval, we need their last 3 months' bank statement to assess their application.
 
-Continue with payment plan selection."""
-                    else:
-                        return f"""Great news! 🥳 Patient {patient_name} is **APPROVED** ✅ for a no-cost EMI payment plan.
+Upload bank statement by clicking on the link below.
 
-You are just 4 steps away from the disbursal.
+{bank_statement_link}"""
+                            
+                            else:
+                                # Handle rejection or other statuses
+                                return f"""We regret to inform you that Patient {patient_name} is not eligible for the proposed loan amount.
 
-Continue on the link to complete the process and get the loan disbursed.
+{patient_name} can try financing their treatment via No-Cost Credit & Debit Card EMI or someone from their immediate family can apply on their behalf.
 
-{link_to_display}"""
-                else:
-                    return f"""We regret to inform you that Patient {patient_name} is not eligible for the proposed loan amount.
+CTA -
+
+No-cost Credit & Debit Card EMI
+
+Re-enquire with your family member's details."""
+                
+                # Fallback: If no specific flow is triggered, use default logic
+                patient_name = session.get("data", {}).get("fullName", "")
+                return f"""We regret to inform you that Patient {patient_name} is not eligible for the proposed loan amount.
 
 {patient_name} can try financing their treatment via No-Cost Credit & Debit Card EMI or someone from their immediate family can apply on their behalf.
 
@@ -3488,14 +3452,83 @@ Re-enquire with your family member's details."""
                 logger.error(f"Session {session_id}: User ID not found in session data")
                 return "User ID not found. Please start a new conversation."
             
+            # Get loan_id from session data
+            session_data = session.get("data", {})
+            loan_id = session_data.get("loanId")
+            
+            # Try to get loanId from API response with safe access
+            api_responses = session_data.get("api_responses", {})
+            if "save_loan_details" in api_responses:
+                save_loan_response = api_responses["save_loan_details"]
+                if isinstance(save_loan_response, dict) and "data" in save_loan_response:
+                    # API response format: {"status": 200, "data": {"loanId": "...", ...}}
+                    loan_id = save_loan_response["data"].get("loanId") or loan_id
+                elif isinstance(save_loan_response, dict) and "loanId" in save_loan_response:
+                    # Direct loanId in response
+                    loan_id = save_loan_response.get("loanId") or loan_id
+            
+            logger.info(f"Session {session_id}: Retrieved loan_id: {loan_id} for post-approval address details")
+            
             # Call get_assigned_product API first
             logger.info(f"Session {session_id}: Calling get_assigned_product API for user_id: {user_id}")
             assigned_product_response = LoanAPIClient().get_assigned_product(user_id)
             
             # Check if API call was successful (status 200)
             if assigned_product_response and assigned_product_response.get("status") == 200:
-                logger.info(f"Session {session_id}: Assigned product API returned status 200, proceeding with address details")
+                logger.info(f"Session {session_id}: Assigned product API returned status 200, proceeding with BRE decision check")
                 
+                # Check BRE decision if loan_id is available
+                if loan_id:
+                    logger.info(f"Session {session_id}: Calling get_bre_decision API for loan_id: {loan_id}")
+                    bre_decision_response = self.api_client.get_bre_decision(loan_id)
+                    logger.info(f"Session {session_id}: BRE decision response: {bre_decision_response}")
+                    
+                    # Check if BRE decision API was successful and get lender details
+                    if bre_decision_response and bre_decision_response.get("status") == 200:
+                        bre_data = bre_decision_response.get("data", {})
+                        selected_lender = bre_data.get("selectedLender", "")
+                        lender_decision = bre_data.get("lenderDecision", "")
+                        
+                        logger.info(f"Session {session_id}: Selected lender: {selected_lender}, Lender decision: {lender_decision}")
+                        
+                        # Check if lender is fibe+Approved
+                        if selected_lender == "FIBE" and lender_decision == "APPROVED":
+                            logger.info(f"Session {session_id}: Lender is FIBE+APPROVED, calling get_redirection_sso_url API")
+                            
+                            # Call get_redirection_sso_url API
+                            redirection_response = self.api_client.get_redirection_sso_url(loan_id)
+                            logger.info(f"Session {session_id}: Redirection SSO URL response: {redirection_response}")
+                            
+                            # Check if redirection API was successful
+                            if redirection_response and redirection_response.get("status") == 200:
+                                redirection_data = redirection_response.get("data", {})
+                                redirection_url = redirection_data.get("redirectionUrl", "")
+                                
+                                if redirection_url:
+                                    logger.info(f"Session {session_id}: Got redirection URL: {redirection_url}")
+                                    
+                                    # Update status to post_approval_address_details
+                                    SessionManager.update_session_data_field(session_id, "status", "post_approval_address_details")
+                                    SessionManager.update_session_data_field(session_id, "data.post_approval_address_details", datetime.now().isoformat())
+                                    
+                                    response_message = f"""Continue your remaining journey by below URL
+
+{redirection_url}"""
+                                    
+                                    logger.info(f"Session {session_id}: Updated status to post_approval_address_details and provided redirection URL")
+                                    return response_message
+                                else:
+                                    logger.warning(f"Session {session_id}: Redirection URL is empty in response")
+                            else:
+                                logger.warning(f"Session {session_id}: Redirection SSO URL API failed: {redirection_response}")
+                        else:
+                            logger.info(f"Session {session_id}: Lender is not FIBE+APPROVED (lender: {selected_lender}, decision: {lender_decision})")
+                    else:
+                        logger.warning(f"Session {session_id}: BRE decision API failed: {bre_decision_response}")
+                else:
+                    logger.warning(f"Session {session_id}: Loan ID not found, cannot check BRE decision")
+                
+                # Default response for address details (when not FIBE+APPROVED or BRE decision failed)
                 response_message = f"""
 Kindly confirm patient's address details by clicking below button.
 
