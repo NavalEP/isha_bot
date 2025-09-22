@@ -12,11 +12,17 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from pathlib import Path
 import os
+import sys
 
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Add the project root to the Python path and setup environment
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from setup_env import setup_environment
+setup_environment()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -34,10 +40,10 @@ MOCK_API = os.getenv('MOCK_API', 'true')
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-qa=jz*72l$4oz%e_%k$e08wq^f38g(0-zt$g&hxrf_-gp@3+8-')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
 # ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '34.131.33.60', 'loanbot.carepay.money']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '34.131.33.60', 'loanbot.carepay.money', 'backend.carepay.money']
 # ALLOWED_HOSTS_ENV = os.getenv('ALLOWED_HOSTS', '')
 # if ALLOWED_HOSTS_ENV:
 #     ALLOWED_HOSTS.extend([host.strip() for host in ALLOWED_HOSTS_ENV.split(',')])
@@ -65,7 +71,8 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # 'django.middleware.clickjacking.XFrameOptionsMiddleware',  # Commented out to allow iframe embedding
+    'cpapp.middleware.IframeEmbeddingMiddleware',  # Custom middleware for iframe embedding
 ]
 
 ROOT_URLCONF = 'backend.urls'
@@ -95,10 +102,10 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.getenv('DB_NAME', 'postgres'),
-        'USER': os.getenv('DB_USER', 'postgres.pykjnbmnxyvmymvokwys'),
-        'PASSWORD': os.getenv('DB_PASSWORD', 'naval@yadv@123'),
+        'USER': os.getenv('DB_USER', 'postgres.cpefglsqzbtijrwbzqaf'),
+        'PASSWORD': os.getenv('DB_PASSWORD', 'Naval@yadav@123'),
         'HOST': os.getenv('DB_HOST', 'aws-0-ap-south-1.pooler.supabase.com'),
-        'PORT': os.getenv('DB_PORT', '6543'),
+        'PORT': os.getenv('DB_PORT', '5432'),
     }
 }
 
@@ -211,6 +218,18 @@ CORS_ALLOW_HEADERS = [
 # if cors_headers_str:
 #     CORS_ALLOW_HEADERS = [header.strip().lower() for header in cors_headers_str.split(',')]
 
+# Security settings for iframe embedding
+# Allow the application to be embedded in iframes from any domain
+X_FRAME_OPTIONS = 'ALLOWALL'
+
+# Content Security Policy settings
+# Allow frame-ancestors from any domain
+CSP_FRAME_ANCESTORS = ("'self'", "*")
+
+# Additional security headers (optional - for better iframe support)
+SECURE_BROWSER_XSS_FILTER = False  # Disable XSS filter for iframe compatibility
+SECURE_CONTENT_TYPE_NOSNIFF = False  # Disable content type sniffing for iframe compatibility
+
 # REST Framework settings
 REST_FRAMEWORK = {
     'DEFAULT_PARSER_CLASSES': [
@@ -224,4 +243,72 @@ REST_FRAMEWORK = {
     ],
 }
 
+# Logging Configuration
+# LOGGING = {
+#     'version': 1,
+#     'disable_existing_loggers': False,
+#     'formatters': {
+#         'verbose': {
+#             'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+#             'style': '{',
+#         },
+#         'simple': {
+#             'format': '{levelname} {asctime} {module} {message}',
+#             'style': '{',
+#         },
+#         'console': {
+#             'format': '[{asctime}] {levelname} {name}: {message}',
+#             'style': '{',
+#             'datefmt': '%Y-%m-%d %H:%M:%S',
+#         },
+#     },
+#     'handlers': {
+#         'console': {
+#             'level': 'DEBUG',
+#             'class': 'logging.StreamHandler',
+#             'formatter': 'console',
+#         },
+#         'file': {
+#             'level': 'INFO',
+#             'class': 'logging.FileHandler',
+#             'filename': os.path.join(BASE_DIR, 'logs', 'django.log'),
+#             'formatter': 'verbose',
+#         },
+#     },
+#     'root': {
+#         'handlers': ['console'],
+#         'level': 'INFO',
+#     },
+#     'loggers': {
+#         'django': {
+#             'handlers': ['console', 'file'],
+#             'level': 'INFO',
+#             'propagate': False,
+#         },
+#         'cpapp': {
+#             'handlers': ['console', 'file'],
+#             'level': 'DEBUG',
+#             'propagate': False,
+#         },
+#         'cpapp.services.agent': {
+#             'handlers': ['console', 'file'],
+#             'level': 'DEBUG',
+#             'propagate': False,
+#         },
+#         'cpapp.services.api_client': {
+#             'handlers': ['console', 'file'],
+#             'level': 'DEBUG',
+#             'propagate': False,
+#         },
+#         'langchain': {
+#             'handlers': ['console'],
+#             'level': 'WARNING',
+#             'propagate': False,
+#         },
+#     },
+# }
 
+# # Create logs directory if it doesn't exist
+# LOGS_DIR = os.path.join(BASE_DIR, 'logs')
+# if not os.path.exists(LOGS_DIR):
+#     os.makedirs(LOGS_DIR)
