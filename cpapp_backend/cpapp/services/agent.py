@@ -59,6 +59,7 @@ class CarepayAgent:
         - When a user provides any information that needs to be saved (gender, marital status, education level, treatment reason, treatment cost, date of birth, pincode), you MUST call the corresponding tool. Do NOT generate any response until you have called the tool.
         - When a user provides a treatment reason (e.g., "hair transplant", "dental surgery"), IMMEDIATELY call the correct_treatment_reason tool.
         - When a user provides a pincode (6-digit number), IMMEDIATELY call the save_missing_basic_and_address_details tool.
+        - CRITICAL PAN UPLOAD RULE: After PAN card upload confirmation ("PAN card processed successfully"), you MUST ask for gender selection using the exact prompt: "Please select Patient's gender:\n1. Male\n2. Female\n"
         - CRITICAL: When you have just asked for missing details (like gender) and the user responds with that information, you MUST call save_gender_details tool. After calling save_gender_details, proceed directly to pan_verification, employment_verification, save_employment_details, and get_bureau_decision tools in sequence. Do NOT call save_basic_details again after save_gender_details.
         - CRITICAL: After calling save_missing_basic_and_address_details tool, DO NOT call save_basic_details tool again. Follow the workflow sequence directly.
         - CRITICAL: after calling save_missing_basic_and_address_details, According Workflow A or B continue the next step
@@ -68,6 +69,8 @@ class CarepayAgent:
         - You MUST execute ALL steps in sequence for the chosen workflow. Do NOT stop until the workflow is complete.
         - CRITICAL: After collecting date of birth with correct_date_of_birth tool, NEVER call save_basic_details. Proceed directly to gender collection.
         - CRITICAL: After collecting gender with save_gender_B_details tool, NEVER call save_basic_details. Proceed directly to Step 3 (PAN verification).
+        - CRITICAL: After PAN card upload confirmation ("PAN card processed successfully"), IMMEDIATELY ask for gender selection and call save_gender_B_details tool.
+        - CRITICAL: PAN UPLOAD FLOW: When user uploads PAN card and you receive "PAN card processed successfully" message, you MUST immediately ask: "Please select Patient's gender:\n1. Male\n2. Female\n" and wait for user response, then call save_gender_B_details tool.
 
         ----
 
@@ -145,6 +148,9 @@ class CarepayAgent:
         - Only STOP after get_bureau_decision or if treatmentCost < ₹3,000 or Juspay Cardless is ELIGIBLE.
         - CRITICAL: After calling save_gender_details (or any other missing details tool), proceed directly to pan_verification using session_id, employment_verification, save_employment_details, and get_bureau_decision. Do NOT call save_basic_details again.
         - CRITICAL: After pan upload, calling pan_verification using session_id, proceed directly to employment_verification, save_employment_details, and get_bureau_decision. Do NOT call save_basic_details again.
+        - CRITICAL: PAN UPLOAD GENDER REQUIREMENT: After PAN card upload confirmation ("PAN card processed successfully"), you MUST ask for gender selection before proceeding to pan_verification.
+        - CRITICAL: Use the exact gender prompt: "Please select Patient's gender:\n1. Male\n2. Female\n"
+        - CRITICAL: Wait for user response and call save_gender_details tool before proceeding to pan_verification.
         - CRITICAL: when follow workflow B then After calling save_missing_basic_and_address_details (when pincode is provided), ask for PAN card details and then call pan_verification using session_id, employment_verification, save_employment_details, and get_bureau_decision. Do NOT call process_address_data again and Do NOT call proces_prefill_data_for_basic_details again.
         - CRITICAL: when follow workflow A then After calling save_missing_basic_and_address_details (when pincode is provided), proceed directly to process_prefill_data_for_basic_details, pan_verification using session_id, employment_verification, save_employment_details, and get_bureau_decision. Do NOT call process_address_data again.
         
@@ -173,7 +179,7 @@ class CarepayAgent:
         Step 2: PAN Card Collection
         - Ask: "Please provide Patient's PAN card details. You can either:\n\n**Upload Patient's PAN card** by clicking the file upload button below\n**Enter Patient's PAN card number manually** (10-character alphanumeric code)\n\n"
         - IF user provides a PAN number → handle_pan_card_number → then ask for date of birth (DD-MM-YYYY) and call save by correct_date_of_birth tool → then must ask for gender: "Please select Patient's gender:\n1. Male\n2. Female\n" and wait for user response, then call save_gender_B_details
-        - IF user uploads PAN card → wait for upload confirmation message(PAN card processed successfully) → then ask: "Please select Patient's gender:\n1. Male\n2. Female\n" and wait for user response, then call save_gender_B_details
+        - IF user uploads PAN card → wait for upload confirmation message("PAN card processed successfully") → then MUST ask for gender: "Please select Patient's gender:\n1. Male\n2. Female\n" and wait for user response, then call save_gender_B_details
         - After PAN is saved and additional details collected, continue with Step 3
       
         Step 3: PAN Verification
@@ -199,6 +205,11 @@ class CarepayAgent:
         Do Not Repeat Rules:
         - Never mix Workflow A and Workflow B.
 
+        **CRITICAL RULES FOR WORKFLOW B:**
+        - CRITICAL: After PAN card upload confirmation ("PAN card processed successfully"), you MUST ask for gender selection before proceeding to Step 3 (PAN verification).
+        - CRITICAL: Use the exact gender prompt: "Please select Patient's gender:\n1. Male\n2. Female\n"
+        - CRITICAL: Wait for user response and call save_gender_B_details tool before proceeding.
+
         End Condition:
         - Workflow B stops ONLY after get_bureau_decision is called and its formatted response is shown.
 
@@ -221,6 +232,9 @@ class CarepayAgent:
         - NEVER add, modify, or skip any steps in the workflow.
         - If any step fails, continue to the next step unless otherwise specified.
         - Only STOP the process when you reach get_bureau_decision (or if treatmentCost < ₹3,000 or Juspay Cardless is ELIGIBLE).
+        - CRITICAL: After collecting date of birth using correct_date_of_birth tool, NEVER call save_basic_details. Proceed directly to the next step in the workflow.
+        - CRITICAL: After collecting gender using save_gender_B_details tool, NEVER call save_basic_details. Proceed directly to PAN verification.
+        - CRITICAL: After PAN card upload confirmation message ("PAN card processed successfully"), IMMEDIATELY ask for gender selection using the exact prompt: "Please select Patient's gender:\n1. Male\n2. Female\n" and wait for user response, then call save_gender_B_details tool.
 
         ----
 
@@ -322,6 +336,7 @@ CRITICAL CONTEXT AWARENESS RULES:
 10. Continue from where you left off based on the current step in the workflow
 11. CRITICAL: After missing details collection is complete, proceed to the next workflow step (PAN verification, employment verification, etc.) - DO NOT restart the workflow
 12. Workflow B is triggered when prefill data is empty (all important fields are empty) or when phoneToPrefill API fails
+13. CRITICAL: After PAN card upload confirmation message ("PAN card processed successfully"), IMMEDIATELY ask for gender selection using the exact prompt: "Please select Patient's gender:\n1. Male\n2. Female\n"
 
 """
             return enhanced_prompt
@@ -2695,6 +2710,19 @@ CRITICAL CONTEXT AWARENESS RULES:
                 return json.dumps({"status": 400, "error": "User ID is required for PAN verification"})
             
             logger.info(f"Performing PAN verification for user ID: {user_id}")
+            
+            # # For testing purposes, return a mock success response
+            # # TODO: Replace with actual API call when ready
+            # result = {
+            #     "status": 200,
+            #     "data": {
+            #         "pan_verified": True,
+            #         "message": "PAN verification successful",
+            #         "user_id": user_id
+            #     }
+            # }
+            
+            # Uncomment when actual API is ready:
             result = self.api_client.pan_verification(user_id)
         
             if session_id:
@@ -3483,7 +3511,16 @@ Re-enquire with your family member's details."""
                                     SessionManager.update_session_data_field(session_id, "status", "post_approval_address_details")
                                     SessionManager.update_session_data_field(session_id, "data.post_approval_address_details", datetime.now().isoformat())
                                     
-                                    response_message = f"""Continue your remaining journey by below URL
+                                    response_message = f"""
+Treatment is now just 3 steps away\n\n
+
+•⁠ Complete KYC.\n\n
+
+•⁠ Set up auto-debit.\n\n
+
+•⁠ Give consent to disburse.\n\n
+
+Click on the button below to continue journey.
 
 {redirection_url}"""
                                     
