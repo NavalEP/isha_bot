@@ -45,9 +45,9 @@ class CarepayAPIClient:
             
             response = None
             if method.upper() == "GET":
-                response = requests.get(url, params=params, headers=headers, timeout=30)
+                response = requests.get(url, params=params, headers=headers, timeout=60)
             elif method.upper() == "POST":
-                response = requests.post(url, params=params, json=data, headers=headers, timeout=30)
+                response = requests.post(url, params=params, json=data, headers=headers, timeout=60)
             else:
                 error_msg = f"Unsupported method: {method}"
                 logger.error(error_msg)
@@ -89,7 +89,7 @@ class CarepayAPIClient:
                 }
             
         except requests.exceptions.Timeout as e:
-            error_msg = f"API request timeout after 30 seconds: {str(e)}"
+            error_msg = f"API request timeout after 60 seconds: {str(e)}"
             logger.error(error_msg)
             return {"status": 408, "error": error_msg, "url": url, "method": method}
         except requests.exceptions.ConnectionError as e:
