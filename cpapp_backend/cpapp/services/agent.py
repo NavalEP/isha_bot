@@ -3325,7 +3325,7 @@ You are just 5 steps away from the disbursal.
 Continue with payment plan selection."""
                             
                             elif selected_lender == "FINDOC" and lender_decision == "INCOME VERIFICATION REQUIRED":
-                                bank_statement_link = f"https://uat.carepay.money/patient/digibankstatement/{user_id}"
+                                bank_statement_link = f"https://carepay.money/patient/digibankstatement/{user_id}"
                                 logger.info(f"Session {session_id}: Using FINDOC income verification flow with bank statement link: {bank_statement_link}")
                                 return f"""Patient {patient_name} has a fair chance of approval, we need their last 3 months' bank statement to assess their application.
 
@@ -3352,7 +3352,7 @@ Upload bank statement by clicking on the link below.
 {redirection_url}"""
                                 else:
                                     # Fallback to default bank statement link if redirection URL not available
-                                    bank_statement_link = f"https://uat.carepay.money/patient/digibankstatement/{user_id}"
+                                    bank_statement_link = f"https://carepay.money/patient/digibankstatement/{user_id}"
                                     logger.info(f"Session {session_id}: Fallback to default bank statement link: {bank_statement_link}")
                                     return f"""Patient {patient_name} has a fair chance of approval, we need their last 3 months' bank statement to assess their application.
 
@@ -3617,9 +3617,9 @@ Kindly confirm patient's address details by clicking below button.
                     logger.error(f"Session {session_id}: Failed to get DigiLocker URL. Response: {digilocker_response}")
                 
                 # Construct the URLs with proper loan ID and user ID - ensure loanId is not empty
-                face_verification_url = f"https://uat.carepay.money/patient/faceverification/{user_id}" if user_id else "https://carepay.money/patient/faceverification/"
-                emi_autopay_url = f"https://uat.carepay.money/patient/emiautopayintro/{loan_id}" if loan_id else "https://carepay.money/patient/emiautopayintro/"
-                agreement_esigning_url = f"https://uat.carepay.money/patient/agreementesigning/{loan_id}" if loan_id else "https://carepay.money/patient/agreementesigning/"
+                face_verification_url = f"https://carepay.money/patient/faceverification/{user_id}" if user_id else "https://carepay.money/patient/faceverification/"
+                emi_autopay_url = f"https://carepay.money/patient/emiautopayintro/{loan_id}" if loan_id else "https://carepay.money/patient/emiautopayintro/"
+                agreement_esigning_url = f"https://carepay.money/patient/agreementesigning/{loan_id}" if loan_id else "https://carepay.money/patient/agreementesigning/"
                 
                 logger.info(f"Session {session_id}: Constructed URLs - Face: {face_verification_url}, EMI: {emi_autopay_url}, Agreement: {agreement_esigning_url}")
                 
