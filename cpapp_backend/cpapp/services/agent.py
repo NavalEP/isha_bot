@@ -4283,14 +4283,63 @@ Continue your journey with the link here:\n\n
                 except (ValueError, TypeError):
                     show_detailed_approval = False
             
+            # Get user ID from session
+            user_id = session.get("data", {}).get("userId")
+            loan_id = None
+            lender_decision = None
+            limit_enhancement = None
+            
+            if user_id:
+                # Get loan details by user ID
+                loan_details_response = self.api_client.get_loan_details_by_user_id(user_id)
+                logger.info(f"Session {session_id}: Loan details response for user_id {user_id}: {json.dumps(loan_details_response) if loan_details_response else 'None'}")
+                
+                if loan_details_response and loan_details_response.get("status") == 200:
+                    loan_data = loan_details_response.get("data", {})
+                    loan_id = loan_data.get("loanId")
+                    logger.info(f"Session {session_id}: Extracted loan ID: {loan_id}")
+                
+                if loan_id:
+                    # Check if doctor is mapped by FIBE
+                    doctor_id = session.get("data", {}).get("doctorId") or session.get("data", {}).get("doctor_id")
+                    
+                    if doctor_id and hasattr(self.api_client, 'check_doctor_mapped_by_nbfc'):
+                        check_doctor_mapped_by_nbfc_response = self.api_client.check_doctor_mapped_by_nbfc(doctor_id)
+                        logger.info(f"Session {session_id}: Check doctor mapped by FIBE response for doctor_id {doctor_id}: {json.dumps(check_doctor_mapped_by_nbfc_response)}")
+
+                        if check_doctor_mapped_by_nbfc_response.get("status") == 200:
+                            doctor_mapped_by_nbfc = check_doctor_mapped_by_nbfc_response.get("data")
+                            if doctor_mapped_by_nbfc == "true":
+                               
+                                logger.info(f"Session {session_id}: Doctor {doctor_id} is mapped by FIBE.")
+                                
+                                # Call profile ingestion for Fibe with loan ID
+                                profile_ingestion_response = self.api_client.profile_ingestion_for_fibe_loanId(loan_id)
+                                logger.info(f"Session {session_id}: Profile ingestion response for loan_id {loan_id}: {json.dumps(profile_ingestion_response) if profile_ingestion_response else 'None'}")
+                    
+                    # Always call BRE decision API regardless of doctor mapping
+                    bre_decision_response = self.api_client.get_bre_decision(loan_id)
+                    logger.info(f"Session {session_id}: BRE decision response for loan_id {loan_id}: {json.dumps(bre_decision_response) if bre_decision_response else 'None'}")
+                    
+                    # Process BRE decision response
+                    if bre_decision_response and bre_decision_response.get("status") == 200:
+                        bre_data = bre_decision_response.get("data", {})
+                        selected_lender = bre_data.get("selectedLender")
+                        lender_decision = bre_data.get("lenderDecision")
+                        limit_enhancement = bre_data.get("limit")
+                        
+                        logger.info(f"Session {session_id}: Selected lender: {selected_lender}, Lender decision: {lender_decision}")
+                    
+                    logger.info(f"Session {session_id}: BRE decision response for loan_id {loan_id}: {json.dumps(bre_decision_response) if bre_decision_response else 'None'}")
+            
             # Get status from bureau decision
             status = bureau_decision.get("status")
             logger.info(f"Bureau decision status: '{status}' (type: {type(status)})")
             
             # Format response based on status (case-insensitive)
-            if status and status.upper() == "APPROVED":
+            if status and status.upper() == "APPROVED" or lender_decision == "APPROVED":
                 
-                    max_treatment_amount = bureau_decision.get("maxTreatmentAmount", 0)
+                    max_treatment_amount = limit_enhancement or bureau_decision.get("maxTreatmentAmount", 0)
                     try:
                         max_treatment_amount = float(str(max_treatment_amount).replace(',', '').replace('₹', '')) if max_treatment_amount else 0
                     except (ValueError, TypeError):
