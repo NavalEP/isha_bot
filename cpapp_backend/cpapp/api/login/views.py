@@ -107,6 +107,8 @@ class VerifyOtpView(APIView):
         
         # Verify the OTP
         response = api_client.verify_otp(phone_number, otp)
+
+        user_id = response.get('data')
         
         # Handle case when response is a string instead of a dictionary
         if isinstance(response, str):
@@ -127,7 +129,7 @@ class VerifyOtpView(APIView):
             'phone_number': phone_number,
             'doctor_id': doctor_id,
             'doctor_name': doctor_name,
-            'exp': datetime.datetime.utcnow() + datetime.timedelta(days=1)
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7)
         }
         
         token = jwt.encode(
@@ -141,7 +143,8 @@ class VerifyOtpView(APIView):
             "token": token,
             "phone_number": phone_number,
             "doctor_id": doctor_id,
-            "doctor_name": doctor_name
+            "doctor_name": doctor_name,
+            "userId": user_id
         }
         print(response_data)
         

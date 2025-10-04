@@ -2,6 +2,7 @@ import os
 import requests
 import json
 import logging
+import time
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ class CarepayAPIClient:
     def _make_request(self, method: str, endpoint: str, params: Optional[Dict[str, Any]] = None, 
                      data: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Make a request to the API
+        Make a request to the API with retry mechanism for 502 errors
         
         Args:
             method: HTTP method
@@ -31,79 +32,97 @@ class CarepayAPIClient:
         Returns:
             API response
         """
-        try:
-            url = f"{self.base_url}/{endpoint}"
-            logger.info(f"Making {method} request to {url}")
-            
-            # Log request details for debugging
-            if params:
-                logger.debug(f"Request params: {params}")
-            if data:
-                logger.debug(f"Request data: {data}")
-            if headers:
-                logger.debug(f"Request headers: {headers}")
-            
-            response = None
-            if method.upper() == "GET":
-                response = requests.get(url, params=params, headers=headers, timeout=60)
-            elif method.upper() == "POST":
-                response = requests.post(url, params=params, json=data, headers=headers, timeout=60)
-            else:
-                error_msg = f"Unsupported method: {method}"
-                logger.error(error_msg)
-                return {"status": 400, "error": error_msg}
-            
-            logger.info(f"Response status: {response.status_code}")
-            logger.debug(f"Response headers: {dict(response.headers)}")
-            
-            # Log response body (truncated for readability)
-            response_text = response.text
-            if len(response_text) > 1000:
-                logger.info(f"Response body (truncated): {response_text[:1000]}...")
-            else:
-                logger.info(f"Response body: {response_text}")
-            
-            # Handle HTTP error status codes
-            if response.status_code >= 400:
-                error_response = {
-                    "status": response.status_code, 
-                    "error": response_text,
-                    "url": url,
-                    "method": method
-                }
-                logger.error(f"HTTP error {response.status_code}: {response_text}")
-                return error_response
-            
-            # Try to parse JSON response
+        max_retries = 3
+        retry_delay = 1  # seconds
+        
+        for attempt in range(max_retries + 1):  # 0, 1, 2, 3 (total 4 attempts)
             try:
-                json_response = response.json()
-                logger.debug(f"Successfully parsed JSON response")
-                return json_response
-            except json.JSONDecodeError as e:
-                logger.warning(f"Could not parse JSON response: {e}")
-                logger.warning(f"Raw response: {response_text}")
-                return {
-                    "status": 200, 
-                    "data": response_text,
-                    "warning": "Response was not valid JSON"
-                }
-            
-        except requests.exceptions.Timeout as e:
-            error_msg = f"API request timeout after 60 seconds: {str(e)}"
-            logger.error(error_msg)
-            return {"status": 408, "error": error_msg, "url": url, "method": method}
-        except requests.exceptions.ConnectionError as e:
-            error_msg = f"API connection error: {str(e)}"
-            logger.error(error_msg)
-            return {"status": 503, "error": error_msg, "url": url, "method": method}
-        except requests.exceptions.RequestException as e:
-            error_msg = f"API request failed: {str(e)}"
-            logger.error(error_msg)
-            return {"status": 500, "error": error_msg, "url": url, "method": method}
-        except Exception as e:
-            error_msg = f"Unexpected error during API request: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            return {"status": 500, "error": error_msg, "url": url, "method": method}
+                url = f"{self.base_url}/{endpoint}"
+                
+                if attempt > 0:
+                    logger.info(f"Retry attempt {attempt} for {method} request to {url}")
+                    time.sleep(retry_delay * attempt)  # Exponential backoff
+                else:
+                    logger.info(f"Making {method} request to {url}")
+                
+                # Log request details for debugging
+                if params:
+                    logger.debug(f"Request params: {params}")
+                if data:
+                    logger.debug(f"Request data: {data}")
+                if headers:
+                    logger.debug(f"Request headers: {headers}")
+                
+                response = None
+                if method.upper() == "GET":
+                    response = requests.get(url, params=params, headers=headers, timeout=60)
+                elif method.upper() == "POST":
+                    response = requests.post(url, params=params, json=data, headers=headers, timeout=60)
+                else:
+                    error_msg = f"Unsupported method: {method}"
+                    logger.error(error_msg)
+                    return {"status": 400, "error": error_msg}
+                
+                logger.info(f"Response status: {response.status_code}")
+                logger.debug(f"Response headers: {dict(response.headers)}")
+                
+                # Log response body (truncated for readability)
+                response_text = response.text
+                if len(response_text) > 1000:
+                    logger.info(f"Response body (truncated): {response_text[:1000]}...")
+                else:
+                    logger.info(f"Response body: {response_text}")
+                
+                # Check for 502 error and retry if not the last attempt
+                if response.status_code == 502 and attempt < max_retries:
+                    logger.warning(f"Received 502 error, will retry. Attempt {attempt + 1}/{max_retries}")
+                    continue
+                
+                # Handle HTTP error status codes
+                if response.status_code >= 400:
+                    error_response = {
+                        "status": response.status_code, 
+                        "error": response_text,
+                        "url": url,
+                        "method": method
+                    }
+                    logger.error(f"HTTP error {response.status_code}: {response_text}")
+                    return error_response
+                
+                # Try to parse JSON response
+                try:
+                    json_response = response.json()
+                    logger.debug(f"Successfully parsed JSON response")
+                    return json_response
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Could not parse JSON response: {e}")
+                    logger.warning(f"Raw response: {response_text}")
+                    return {
+                        "status": 200, 
+                        "data": response_text,
+                        "warning": "Response was not valid JSON"
+                    }
+                
+            except requests.exceptions.Timeout as e:
+                error_msg = f"API request timeout after 60 seconds: {str(e)}"
+                logger.error(error_msg)
+                return {"status": 408, "error": error_msg, "url": url, "method": method}
+            except requests.exceptions.ConnectionError as e:
+                error_msg = f"API connection error: {str(e)}"
+                logger.error(error_msg)
+                return {"status": 503, "error": error_msg, "url": url, "method": method}
+            except requests.exceptions.RequestException as e:
+                error_msg = f"API request failed: {str(e)}"
+                logger.error(error_msg)
+                return {"status": 500, "error": error_msg, "url": url, "method": method}
+            except Exception as e:
+                error_msg = f"Unexpected error during API request: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                return {"status": 500, "error": error_msg, "url": url, "method": method}
+        
+        # If we reach here, all retries failed
+        logger.error(f"All {max_retries} retry attempts failed for {method} request to {url}")
+        return {"status": 502, "error": "Bad Gateway - All retry attempts failed", "url": url, "method": method}
         
     def send_otp(self, phone_number: str) -> Dict[str, Any]:
         """
@@ -116,10 +135,20 @@ class CarepayAPIClient:
             API response
         """
         print(f"Sending OTP to {phone_number} with base URL: {self.base_url}")
-        endpoint = "sendOtp"
-        response = self._make_request('GET', endpoint, params={"phoneNumber": phone_number})
-        print(f"API response: {response}")
-        return response
+        endpoint = "userDetails/sendOtpToMobile"
+        url = f"{self.base_url}/{endpoint}"
+        
+        # Use form data instead of JSON for OTP endpoints
+        form_data = {"mobile": phone_number}
+        response = requests.post(url, data=form_data, timeout=60)
+        
+        try:
+            response_data = response.json()
+        except json.JSONDecodeError:
+            response_data = {"status": response.status_code, "error": "Invalid JSON response"}
+            
+        print(f"API response: {response_data}")
+        return response_data
     
     def verify_otp(self, phone_number: str, otp: str) -> Dict[str, Any]:
         """
@@ -133,13 +162,23 @@ class CarepayAPIClient:
             API response
         """
         print(f"Verifying OTP for {phone_number} with base URL: {self.base_url}")
-        endpoint = "getOtp"
-        response = self._make_request('GET', endpoint, params={
-            "phoneNumber": phone_number,
+        endpoint = "userDetails/verifyOtp"
+        url = f"{self.base_url}/{endpoint}"
+        
+        # Use form data instead of JSON for OTP endpoints
+        form_data = {
+            "mobile": phone_number,
             "otp": otp
-        })
-        print(f"API response: {response}")
-        return response
+        }
+        response = requests.post(url, data=form_data, timeout=60)
+        
+        try:
+            response_data = response.json()
+        except json.JSONDecodeError:
+            response_data = {"status": response.status_code, "error": "Invalid JSON response"}
+            
+        print(f"API response: {response_data}")
+        return response_data
     
     def get_doctor_details(self, phone_number: str) -> Dict[str, Any]:
         """
